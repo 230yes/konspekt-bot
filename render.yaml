@@ -18,12 +18,14 @@ services:
     name: konspekt-website
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn website:app
+    startCommand: python website.py  # ← ИЗМЕНИТЬ ЭТУ СТРОКУ!
     envVars:
+      - key: PORT
+        value: "10000"
       - key: FLASK_SECRET_KEY
         fromService:
           name: konspekt-bot
           type: worker
           key: FLASK_SECRET_KEY
-    healthCheckPath: /
+    healthCheckPath: /health
     autoDeploy: true
