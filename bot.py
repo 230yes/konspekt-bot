@@ -258,102 +258,85 @@ class BotServer(BaseHTTPRequestHandler):
             self.send_error(500, str(e))
     
     def do_POST(self):
-        """Обработка POST запросов"""
-        try:
-            if self.path == '/webhook':  # ⬅️ 4 пробела отступа
-        # ... весь код обработки вебхука с отступом +4 пробела ...
-    # ========== НОВЫЙ КОД (замените старый) ==========
-    content_len = int(self.headers.get('Content-Length', 0))
-    post_data = self.rfile.read(content_len)
-    update_data = json.loads(post_data.decode('utf-8'))
-    
-    # ⭐⭐ ОТЛАДОЧНЫЙ ВЫВОД ⭐⭐
-    print("=" * 60)
-    print("🔥 ВЕБХУК ПОЛУЧЕН ОТ TELEGRAM!")
-    print(f"📊 Тип обновления: {list(update_data.keys())}")
-    print(f"🆔 Update ID: {update_data.get('update_id')}")
-    
-    # Проверяем, что это сообщение
-    if 'message' in update_data:
-        message = update_data['message']
-        print(f"💬 Сообщение от: {message.get('from', {}).get('id')}")
-        print(f"📝 Текст: {message.get('text', 'Нет текста')}")
+    """Обработка POST запросов"""
+    try:
+        if self.path == '/webhook':
+            # ========== НАЧАЛО КОДА ВЕБХУКА ==========
+            content_len = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_len)
+            update_data = json.loads(post_data.decode('utf-8'))
+            
+            # ОТЛАДОЧНЫЙ ВЫВОД
+            print("=" * 60)
+            print("🔥 ВЕБХУК ПОЛУЧЕН ОТ TELEGRAM!")
+            print(f"📊 Тип: {list(update_data.keys())}")
+            print(f"🆔 ID: {update_data.get('update_id')}")
+            
+            if 'message' in update_data:
+                message = update_data['message']
+                print(f"💬 От: {message.get('from', {}).get('id')}")
+                print(f"📝 Текст: {message.get('text')}")
+                
+                if message.get('text') == '/start':
+                    print("✅ Команда /start обнаружена")
+                    
+                    try:
+                        chat_id = message['chat']['id']
+                        token = os.environ.get('BOT_TOKEN')
+                        
+                        import requests
+                        url = f"https://api.telegram.org/bot{token}/sendMessage"
+                        data = {
+                            'chat_id': chat_id,
+                            'text': '✅ Тест: бот работает!',
+                            'parse_mode': 'Markdown'
+                        }
+                        response = requests.post(url, json=data, timeout=5)
+                        print(f"📤 Ответ: статус {response.status_code}")
+                        
+                    except Exception as e:
+                        print(f"❌ Ошибка: {e}")
+            
+            print("=" * 60)
+            # ========== КОНЕЦ ОТЛАДОЧНОГО КОДА ==========
+            
+            logger.info(f"📨 Вебхук: {update_data.get('update_id')}")
+            
+            if bot_instance:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                success = loop.run_until_complete(bot_instance.process_update(update_data))
+                loop.close()
+                print(f"🤖 Обработка: {'✅ Успех' if success else '❌ Ошибка'}")
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'ok': True}).encode())
         
-        # Если это /start, пробуем ответить напрямую
-        if message.get('text') == '/start':
-            print("✅ Обнаружена команда /start, пытаюсь ответить...")
+        elif self.path == '/api/setup-webhook':
+            if not TOKEN:
+                self.send_json({'success': False, 'message': 'Нет токена'})
+                return
             
-            try:
-                chat_id = message['chat']['id']
-                token = os.environ.get('BOT_TOKEN')
-                
-                # Отправляем тестовый ответ через API
-                import requests
-                url = f"https://api.telegram.org/bot{token}/sendMessage"
-                data = {
-                    'chat_id': chat_id,
-                    'text': '✅ Тест: бот получил ваш /start!',
-                    'parse_mode': 'Markdown'
-                }
-                response = requests.post(url, json=data, timeout=5)
-                print(f"📤 Тестовый ответ отправлен, статус: {response.status_code}")
-                print(f"📋 Ответ Telegram: {response.json()}")
-                
-            except Exception as e:
-                print(f"❌ Ошибка отправки тестового ответа: {e}")
-                import traceback
-                traceback.print_exc()
-    else:
-        print(f"⚠️ Это не сообщение, а: {list(update_data.keys())}")
-    
-    print("=" * 60)
-    # ========== КОНЕЦ НОВОГО КОДА ==========
-    
-    # Продолжаем обычную обработку через бота
-    logger.info(f"📨 Вебхук получен: {update_data.get('update_id')}")
-    
-    # Обрабатываем через бота
-    if bot_instance:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        success = loop.run_until_complete(bot_instance.process_update(update_data))
-        loop.close()
-        print(f"🤖 Обработка ботом: {'✅ Успех' if success else '❌ Ошибка'}")
-    
-    self.send_response(200)
-    self.send_header('Content-type', 'application/json')
-    self.end_headers()
-    self.wfile.write(json.dumps({'ok': True}).encode())
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({'ok': True}).encode())
+            webhook_url = f"https://{self.headers.get('Host', 'konspekt-bot.onrender.com')}/webhook"
+            resp = requests.post(f'https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_url}')
             
-            elif self.path == '/api/setup-webhook':
-                # Настройка вебхука
-                if not TOKEN:
-                    self.send_json({'success': False, 'message': 'Нет токена'})
-                    return
-                
-                webhook_url = f"https://{self.headers.get('Host', 'konspekt-bot.onrender.com')}/webhook"
-                resp = requests.post(f'https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_url}')
-                
-                if resp.json().get('ok'):
-                    self.send_json({'success': True, 'message': 'Вебхук настроен!'})
-                else:
-                    self.send_json({'success': False, 'message': 'Ошибка настройки'})
-            
-            elif self.path == '/api/clear-history':
-                webhook_history.clear()
-                self.send_json({'success': True, 'message': 'История очищена'})
-            
+            if resp.json().get('ok'):
+                self.send_json({'success': True, 'message': 'Вебхук настроен!'})
             else:
-                self.send_error(404, "Not Found")
-                
-        except Exception as e:
-            logger.error(f"POST ошибка: {e}")
-            self.send_error(500, str(e))
+                self.send_json({'success': False, 'message': 'Ошибка настройки'})
+        
+        elif self.path == '/api/clear-history':
+            webhook_history.clear()
+            self.send_json({'success': True, 'message': 'История очищена'})
+        
+        else:
+            self.send_error(404, "Not Found")
+            
+    except Exception as e:
+        logger.error(f"POST ошибка: {e}")
+        self.send_error(500, str(e))
     
     def send_json(self, data):
         """Отправка JSON ответа"""
