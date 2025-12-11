@@ -259,8 +259,9 @@ class BotServer(BaseHTTPRequestHandler):
     
     def do_POST(self):
         """Обработка POST запросов"""
-        try: 
+        try:
     if self.path == '/webhook':
+        # ... весь код обработки вебхука с отступом +4 пробела ...
     # ========== НОВЫЙ КОД (замените старый) ==========
     content_len = int(self.headers.get('Content-Length', 0))
     post_data = self.rfile.read(content_len)
