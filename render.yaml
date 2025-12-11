@@ -1,0 +1,29 @@
+services:
+  - type: worker
+    name: konspekt-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_ID
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+
+  - type: web
+    name: konspekt-website
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn website:app
+    envVars:
+      - key: FLASK_SECRET_KEY
+        fromService:
+          name: konspekt-bot
+          type: worker
+          key: FLASK_SECRET_KEY
+    healthCheckPath: /
+    autoDeploy: true
