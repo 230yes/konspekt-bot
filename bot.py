@@ -1,13 +1,10 @@
-import os
+import os       import os
 import json
 import logging
 import asyncio
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
 import requests
-
-# Telegram библиотеки
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -30,73 +27,115 @@ bot_instance = None
 
 if not TOKEN:
     logger.error("❌ BOT_TOKEN не найден! Добавьте в Render.")
-
-# ==================== КЛАСС TELEGRAM БОТА ====================
-class SimpleBot:
+    # ==================== КЛАСС TELEGRAM БОТА ====================
+class KonspektBot:
     def __init__(self, token: str):
         self.token = token
         self.app = Application.builder().token(token).build()
         self.setup_handlers()
-        logger.info("✅ Бот инициализирован")
+        logger.info("✅ Бот KonspektBot инициализирован")
     
     def setup_handlers(self):
         """Настройка обработчиков команд"""
         
         async def start(update: Update, context):
+            """Обработчик команды /start"""
             user = update.effective_user
             
-            # Логируем команду
+            # Логируем в историю
             webhook_history.append({
-                'time': datetime.now().isoformat(),
+                'timestamp': datetime.now().timestamp(),
                 'type': 'command_start',
                 'user_id': user.id,
-                'username': user.username,
-                'command': '/start'
+                'username': user.username
             })
             
+            # Реальный ответ бота
             await update.message.reply_text(
-                f"👋 Привет, {user.first_name}!\n"
-                f"Я Konspekt Bot. Ваш ID: `{user.id}`\n"
-                f"Бот работает на Render!",
+                f"👋 *Привет, {user.first_name}!*\n\n"
+                f"Я *Konspekt Helper Bot* — твой помощник для создания конспектов.\n\n"
+                f"✨ *Что я умею:*\n"
+                f"• Конспектировать тексты\n"
+                f"• Структурировать информацию\n"
+                f"• Создавать карточки для запоминания\n\n"
+                f"📋 *Команды:*\n"
+                f"/start - Запустить бота\n"
+                f"/help - Помощь и справка\n"
+                f"/id - Узнать свой ID\n"
+                f"/site - Открыть веб-панель\n\n"
+                f"🌐 *Веб-сайт:* https://konspekt-bot.onrender.com\n"
+                f"🆔 *Твой ID:* `{user.id}`\n\n"
+                f"💡 *Напиши мне текст, и я создам из него конспект!*",
                 parse_mode='Markdown'
             )
-            logger.info(f"✅ Ответил на /start от {user.id}")
+            logger.info(f"✅ Ответил на /start от пользователя {user.id}")
         
         async def help_cmd(update: Update, context):
+            """Обработчик команды /help"""
             await update.message.reply_text(
-                "📋 Помощь:\n"
-                "/start - начать\n"
-                "/id - ваш ID\n"
-                "/site - сайт бота\n"
-                "Просто напишите текст"
+                "📚 *Konspekt Helper Bot - Помощь*\n\n"
+                "Я помогаю создавать структурированные конспекты.\n\n"
+                "🔧 *Как использовать:*\n"
+                "1. Отправьте мне текст\n"
+                "2. Я проанализирую его\n"
+                "3. Создам конспект с выделением главных идей\n\n"
+                "📋 *Команды:*\n"
+                "• /start - Запустить бота\n"
+                "• /help - Эта справка\n"
+                "• /id - Показать ваш Telegram ID\n"
+                "• /site - Открыть веб-панель управления\n\n"
+                "🌐 *Веб-интерфейс:*\n"
+                "https://konspekt-bot.onrender.com",
+                parse_mode='Markdown'
             )
         
         async def id_cmd(update: Update, context):
+            """Обработчик команды /id"""
             user = update.effective_user
-            await update.message.reply_text(f"🆔 Ваш ID: `{user.id}`", parse_mode='Markdown')
+            await update.message.reply_text(
+                f"🆔 *Ваш Telegram ID:* `{user.id}`\n"
+                f"👤 *Имя:* {user.first_name}\n"
+                f"📛 *Username:* @{user.username or 'нет'}\n\n"
+                f"Этот ID может быть полезен для идентификации.",
+                parse_mode='Markdown'
+            )
         
         async def site_cmd(update: Update, context):
+            """Обработчик команды /site"""
             await update.message.reply_text(
-                "🌐 Сайт бота:\n"
-                "https://konspekt-bot.onrender.com\n\n"
-                "Там можно:\n"
+                "🌐 *Веб-панель управления ботом*\n\n"
+                "Откройте в браузере:\n"
+                "👉 https://konspekt-bot.onrender.com\n\n"
+                "На сайте вы можете:\n"
                 "• Проверить статус бота\n"
-                "• Настроить вебхук\n"
-                "• Увидеть историю сообщений"
+                "• Просмотреть историю сообщений\n"
+                "• Управлять настройками вебхука\n"
+                "• Мониторить активность",
+                parse_mode='Markdown'
             )
         
         async def echo(update: Update, context):
+            """Обработчик текстовых сообщений"""
             text = update.message.text
             
             # Логируем сообщение
             webhook_history.append({
-                'time': datetime.now().isoformat(),
+                'timestamp': datetime.now().timestamp(),
                 'type': 'message',
                 'user_id': update.effective_user.id,
-                'text': text[:100] + ('...' if len(text) > 100 else '')
+                'text_preview': text[:50] + ('...' if len(text) > 50 else '')
             })
             
-            await update.message.reply_text(f"📝 Вы написали: {text}")
+            # Реальный ответ бота
+            await update.message.reply_text(
+                f"📝 *Вы написали:*\n{text}\n\n"
+                f"✨ *Скоро я научусь:*\n"
+                f"• Анализировать текст и выделять ключевые идеи\n"
+                f"• Создавать структурированные конспекты\n"
+                f"• Формировать карточки для запоминания\n\n"
+                f"🆔 *ID сообщения:* `{update.update_id}`",
+                parse_mode='Markdown'
+            )
             logger.info(f"📨 Ответил на сообщение от {update.effective_user.id}")
         
         # Регистрация обработчиков
@@ -116,7 +155,7 @@ class SimpleBot:
             await self.app.initialize()
             await self.app.process_update(update)
             
-            logger.info(f"✅ Обработан вебхук: {update.update_id}")
+            logger.info(f"✅ Вебхук обработан: {update.update_id}")
             return True
             
         except Exception as e:
@@ -126,7 +165,6 @@ class SimpleBot:
     def get_bot_info(self):
         """Получение информации о боте"""
         try:
-            # Получаем информацию о боте асинхронно
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
@@ -145,8 +183,7 @@ class SimpleBot:
         except Exception as e:
             logger.error(f"Ошибка получения информации о боте: {e}")
             return None
-
-# ==================== HTTP СЕРВЕР ====================
+            # ==================== HTTP СЕРВЕР ====================
 class BotServer(BaseHTTPRequestHandler):
     
     def do_GET(self):
@@ -204,7 +241,7 @@ class BotServer(BaseHTTPRequestHandler):
             self.send_error(500, str(e))
     
     def do_POST(self):
-        """Обработка POST запросов"""
+        """Обработка POST запросов (ВЕБХУКИ)"""
         try:
             if self.path == '/webhook':
                 # ВЕБХУК от Telegram
@@ -212,57 +249,37 @@ class BotServer(BaseHTTPRequestHandler):
                 post_data = self.rfile.read(content_len)
                 update_data = json.loads(post_data.decode('utf-8'))
                 
-                # ⭐⭐ ОТЛАДОЧНЫЙ ВЫВОД ⭐⭐
-                print("=" * 60)
-                print("🔥 ВЕБХУК ПОЛУЧЕН ОТ TELEGRAM!")
-                print(f"📊 Тип обновления: {list(update_data.keys())}")
-                print(f"🆔 Update ID: {update_data.get('update_id')}")
+                # Логируем получение вебхука
+                logger.info(f"📨 Вебхук получен: {update_data.get('update_id')}")
                 
-                # Проверяем, что это сообщение
+                # Простая отладка
+                print("=" * 50)
+                print(f"📨 ВЕБХУК: {update_data.get('update_id')}")
+                
                 if 'message' in update_data:
                     message = update_data['message']
-                    print(f"💬 Сообщение от: {message.get('from', {}).get('id')}")
+                    print(f"💬 От: {message.get('from', {}).get('id')}")
                     print(f"📝 Текст: {message.get('text', 'Нет текста')}")
-                    
-                    # Если это /start, пробуем ответить напрямую
-                    if message.get('text') == '/start':
-                        print("✅ Обнаружена команда /start, пытаюсь ответить...")
-                        
-                        try:
-                            chat_id = message['chat']['id']
-                            token = os.environ.get('BOT_TOKEN')
-                            
-                            # Отправляем тестовый ответ через API
-                            # requests уже импортирован в начале файла
-                            url = f"https://api.telegram.org/bot{token}/sendMessage"
-                            data = {
-                                'chat_id': chat_id,
-                                'text': '✅ Тест: бот получил ваш /start!',
-                                'parse_mode': 'Markdown'
-                            }
-                            response = requests.post(url, json=data, timeout=5)
-                            print(f"📤 Тестовый ответ отправлен, статус: {response.status_code}")
-                            print(f"📋 Ответ Telegram: {response.json()}")
-                            
-                        except Exception as e:
-                            print(f"❌ Ошибка отправки тестового ответа: {e}")
-                            import traceback
-                            traceback.print_exc()
-                else:
-                    print(f"⚠️ Это не сообщение, а: {list(update_data.keys())}")
                 
-                print("=" * 60)
-                
-                # Логируем вебхук
-                logger.info(f"📨 Вебхук получен: {update_data.get('update_id')}")
+                print("=" * 50)
                 
                 # Обрабатываем через бота
                 if bot_instance:
+                    print("🤖 Передаю обработку боту...")
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                    success = loop.run_until_complete(bot_instance.process_update(update_data))
+                    
+                    try:
+                        success = loop.run_until_complete(bot_instance.process_update(update_data))
+                        print(f"🤖 Результат обработки: {'✅ Успех' if success else '❌ Ошибка'}")
+                    except Exception as e:
+                        print(f"💥 Ошибка в process_update: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    
                     loop.close()
-                    print(f"🤖 Обработка ботом: {'✅ Успех' if success else '❌ Ошибка'}")
+                else:
+                    print("❌ Бот не инициализирован!")
                 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
@@ -304,6 +321,68 @@ class BotServer(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         """Отключаем стандартное логирование запросов"""
         pass
+        # ==================== ЗАПУСК ПРИЛОЖЕНИЯ ====================
+def setup_webhook():
+    """Настройка вебхука при запуске"""
+    if not TOKEN:
+        logger.error("❌ Не могу настроить вебхук: нет токена")
+        return
+    
+    try:
+        webhook_url = f"https://konspekt-bot.onrender.com/webhook"
+        resp = requests.post(f'https://api.telegram.org/bot{TOKEN}/setWebhook?url={webhook_url}', timeout=10)
+        
+        if resp.json().get('ok'):
+            logger.info(f"✅ Вебхук настроен: {webhook_url}")
+            return True
+        else:
+            logger.warning(f"⚠️ Не удалось настроить вебхук: {resp.json()}")
+            return False
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Ошибка настройки вебхука: {e}")
+        return False
+
+def main():
+    """Главная функция"""
+    global bot_instance
+    
+    logger.info("=" * 50)
+    logger.info("🚀 Запуск Konspekt Bot...")
+    logger.info(f"🌐 Порт: {PORT}")
+    logger.info(f"🤖 Токен: {'✅ Настроен' if TOKEN else '❌ Не настроен'}")
+    logger.info("=" * 50)
+    
+    # Инициализируем бота
+    if TOKEN:
+        try:
+            bot_instance = KonspektBot(TOKEN)
+            logger.info("✅ Бот создан успешно")
+        except Exception as e:
+            logger.error(f"❌ Ошибка создания бота: {e}")
+            bot_instance = None
+    
+    # Настраиваем вебхук
+    if bot_instance:
+        setup_webhook()
+    
+    # Запускаем сервер
+    server = HTTPServer(('0.0.0.0', PORT), BotServer)
+    
+    logger.info(f"✅ Сервер запущен: http://0.0.0.0:{PORT}")
+    logger.info(f"✅ Вебхук: https://konspekt-bot.onrender.com/webhook")
+    logger.info("⏳ Ожидание запросов...")
+    
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("⏹️ Сервер остановлен")
+    except Exception as e:
+        logger.error(f"❌ Ошибка сервера: {e}")
+
+# ==================== ТОЧКА ВХОДА ====================
+if __name__ == '__main__':
+    main()
             # ==================== HTML ШАБЛОН САЙТА ====================
 HTML_TEMPLATE = '''<!DOCTYPE html>
 <html lang="ru">
