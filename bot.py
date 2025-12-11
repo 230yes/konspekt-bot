@@ -261,19 +261,68 @@ class BotServer(BaseHTTPRequestHandler):
         """Обработка POST запросов"""
         try:
             if self.path == '/webhook':
-                # Вебхук от Telegram
-                content_len = int(self.headers.get('Content-Length', 0))
-                post_data = self.rfile.read(content_len)
-                update_data = json.loads(post_data.decode('utf-8'))
+    # ========== НОВЫЙ КОД (замените старый) ==========
+    content_len = int(self.headers.get('Content-Length', 0))
+    post_data = self.rfile.read(content_len)
+    update_data = json.loads(post_data.decode('utf-8'))
+    
+    # ⭐⭐ ОТЛАДОЧНЫЙ ВЫВОД ⭐⭐
+    print("=" * 60)
+    print("🔥 ВЕБХУК ПОЛУЧЕН ОТ TELEGRAM!")
+    print(f"📊 Тип обновления: {list(update_data.keys())}")
+    print(f"🆔 Update ID: {update_data.get('update_id')}")
+    
+    # Проверяем, что это сообщение
+    if 'message' in update_data:
+        message = update_data['message']
+        print(f"💬 Сообщение от: {message.get('from', {}).get('id')}")
+        print(f"📝 Текст: {message.get('text', 'Нет текста')}")
+        
+        # Если это /start, пробуем ответить напрямую
+        if message.get('text') == '/start':
+            print("✅ Обнаружена команда /start, пытаюсь ответить...")
+            
+            try:
+                chat_id = message['chat']['id']
+                token = os.environ.get('BOT_TOKEN')
                 
-                logger.info(f"📨 Вебхук получен: {update_data.get('update_id')}")
+                # Отправляем тестовый ответ через API
+                import requests
+                url = f"https://api.telegram.org/bot{token}/sendMessage"
+                data = {
+                    'chat_id': chat_id,
+                    'text': '✅ Тест: бот получил ваш /start!',
+                    'parse_mode': 'Markdown'
+                }
+                response = requests.post(url, json=data, timeout=5)
+                print(f"📤 Тестовый ответ отправлен, статус: {response.status_code}")
+                print(f"📋 Ответ Telegram: {response.json()}")
                 
-                # Обрабатываем через бота
-                if bot_instance:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    success = loop.run_until_complete(bot_instance.process_update(update_data))
-                    loop.close()
+            except Exception as e:
+                print(f"❌ Ошибка отправки тестового ответа: {e}")
+                import traceback
+                traceback.print_exc()
+    else:
+        print(f"⚠️ Это не сообщение, а: {list(update_data.keys())}")
+    
+    print("=" * 60)
+    # ========== КОНЕЦ НОВОГО КОДА ==========
+    
+    # Продолжаем обычную обработку через бота
+    logger.info(f"📨 Вебхук получен: {update_data.get('update_id')}")
+    
+    # Обрабатываем через бота
+    if bot_instance:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        success = loop.run_until_complete(bot_instance.process_update(update_data))
+        loop.close()
+        print(f"🤖 Обработка ботом: {'✅ Успех' if success else '❌ Ошибка'}")
+    
+    self.send_response(200)
+    self.send_header('Content-type', 'application/json')
+    self.end_headers()
+    self.wfile.write(json.dumps({'ok': True}).encode())
                 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
