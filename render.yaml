@@ -11,21 +11,11 @@ services:
         sync: false
       - key: GOOGLE_CSE_ID
         sync: false
-      - key: FLASK_SECRET_KEY
-        generateValue: true
 
   - type: web
     name: konspekt-website
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python website.py  # ← ИЗМЕНИТЬ ЭТУ СТРОКУ!
-    envVars:
-      - key: PORT
-        value: "10000"
-      - key: FLASK_SECRET_KEY
-        fromService:
-          name: konspekt-bot
-          type: worker
-          key: FLASK_SECRET_KEY
+    startCommand: python website.py  # ← ПРОСТО python website.py
     healthCheckPath: /health
     autoDeploy: true
