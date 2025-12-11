@@ -1,38 +1,43 @@
+import os
 import asyncio
 import logging
-import os
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder,
+    Application,
     CommandHandler,
     MessageHandler,
     filters,
     ContextTypes
 )
-from dotenv import load_dotenv
 
 # ==================== НАСТРОЙКА ====================
-# 1. Загружаем переменные из файла .env
-load_dotenv()
 
-# 2. Получаем токен из переменной окружения
-TOKEN = os.getenv('BOT_TOKEN')
-if not TOKEN:
-    # Сообщение для разработчика, если токен не найден
-    raise ValueError(
-        "❌ ТОКЕН БОТА НЕ НАЙДЕН!\n"
-        "Убедитесь, что:\n"
-        "  1. В корне проекта есть файл '.env'\n"
-        "  2. В нём есть строка: BOT_TOKEN=ваш_токен\n"
-        "  3. Для продакшена (Render): токен задан в настройках Environment Variables"
-    )
-
-# 3. Настраиваем логирование
+# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Получаем токен из переменных окружения Render
+TOKEN = os.environ.get('BOT_TOKEN')
+
+if not TOKEN:
+    logger.error("""
+    ⚠️  ТОКЕН БОТА НЕ НАЙДЕН!
+    
+    На Render необходимо:
+    1. Перейти в настройки сервиса (Settings)
+    2. Найти раздел 'Environment Variables'
+    3. Добавить переменную:
+        Key: BOT_TOKEN
+        Value: ваш_настоящий_токен_бота
+    
+    Токен должен начинаться с цифр, например: 1234567890:ABCdefGHIjkl...
+    """)
+    exit(1)
+
+logger.info("✅ Токен получен, запускаю бота...")
 
 # ==================== ОБРАБОТЧИКИ КОМАНД ====================
 
@@ -41,81 +46,105 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     welcome_text = (
         f"Привет, {user.first_name}! 👋\n"
-        "Я ваш Telegram-бот.\n"
-        "Напишите что-нибудь, и я отвечу."
+        f"Твой ID: {user.id}\n\n"
+        "Я работаю на Render! 🚀\n"
+        "Используй /help для списка команд."
     )
     await update.message.reply_text(welcome_text)
-    logger.info(f"Пользователь {user.id} ({user.first_name}) запустил бота.")
+    logger.info(f"Пользователь {user.id} запустил бота")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает команду /help"""
     help_text = (
-        "📚 *Доступные команды:*\n"
-        "/start - Начать работу с ботом\n"
-        "/help - Показать эту справку\n"
-        "/about - О боте\n\n"
-        "Просто отправьте мне любое текстовое сообщение."
+        "📋 *Доступные команды:*\n"
+        "/start - Начать работу\n"
+        "/help - Эта справка\n"
+        "/id - Показать твой ID\n"
+        "/info - Информация о боте\n\n"
+        "Просто напиши мне что-нибудь, и я отвечу!"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
-async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает команду /about"""
-    about_text = (
-        "🤖 *О боте*\n"
-        "Этот бот создан как безопасный шаблон.\n"
-        "Он использует переменные окружения для хранения токена.\n"
-        "Вы можете легко расширить его функционал."
+async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает команду /id"""
+    user = update.effective_user
+    chat = update.effective_chat
+    
+    id_text = (
+        f"👤 *Твои данные:*\n"
+        f"• ID пользователя: `{user.id}`\n"
+        f"• ID чата: `{chat.id}`\n"
+        f"• Имя: {user.first_name or '—'}\n"
+        f"• Фамилия: {user.last_name or '—'}\n"
+        f"• Юзернейм: @{user.username or '—'}"
     )
-    await update.message.reply_text(about_text, parse_mode='Markdown')
+    await update.message.reply_text(id_text, parse_mode='Markdown')
+
+async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает команду /info"""
+    info_text = (
+        "🤖 *Информация о боте*\n\n"
+        "• *Платформа:* Render\n"
+        "• *Хостинг:* Web Service\n"
+        "• *Библиотека:* python-telegram-bot 20.7\n"
+        "• *Статус:* Активен ✅\n\n"
+        "Бот использует переменные окружения\n"
+        "для безопасного хранения токена."
+    )
+    await update.message.reply_text(info_text, parse_mode='Markdown')
 
 async def echo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Эхо-ответ на любое текстовое сообщение"""
+    """Эхо-ответ на текстовые сообщения"""
     user_message = update.message.text
-    # Можно добавить логику обработки сообщения здесь
-    reply = f"Вы написали:\n`{user_message}`"
-    await update.message.reply_text(reply, parse_mode='Markdown')
+    response = f"📝 Ты написал:\n```\n{user_message}\n```\n\nКоличество символов: {len(user_message)}"
+    await update.message.reply_text(response, parse_mode='Markdown')
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает неизвестные команды"""
     await update.message.reply_text(
-        "🤔 Не понимаю эту команду.\n"
-        "Используйте /help для списка доступных команд."
+        "🤔 Не знаю такой команды.\n"
+        "Попробуй /help для списка команд."
     )
 
 # ==================== ЗАПУСК БОТА ====================
 
 async def main():
-    """Основная функция для настройки и запуска бота"""
-    logger.info("Инициализация приложения бота...")
-    
-    # Создаем приложение с использованием токена
-    application = ApplicationBuilder().token(TOKEN).build()
-    
-    # Регистрируем обработчики команд
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("about", about_command))
-    
-    # Обработчик для текстовых сообщений (все, кроме команд)
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, echo_message)
-    )
-    
-    # Обработчик для неизвестных команд (должен быть последним!)
-    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
-    
-    # Запускаем бота
-    logger.info("Бот запущен и ожидает обновлений...")
-    await application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True  # Игнорируем сообщения, отправленные, пока бот был офлайн
-    )
+    """Основная функция запуска бота"""
+    try:
+        # Создаем приложение бота
+        application = Application.builder().token(TOKEN).build()
+        
+        # Регистрируем обработчики команд
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("id", id_command))
+        application.add_handler(CommandHandler("info", info_command))
+        
+        # Обработчик текстовых сообщений
+        application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, echo_message)
+        )
+        
+        # Обработчик неизвестных команд (последний!)
+        application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+        
+        # Запускаем бота
+        logger.info("🚀 Бот успешно запущен и готов к работе!")
+        logger.info("📡 Ожидаю сообщений...")
+        
+        await application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка: {e}")
+        raise
 
 if __name__ == '__main__':
-    # Запускаем асинхронную основную функцию
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Работа бота завершена пользователем.")
+        logger.info("⏹️  Бот остановлен пользователем")
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
+        logger.error(f"💥 Фатальная ошибка: {e}")
