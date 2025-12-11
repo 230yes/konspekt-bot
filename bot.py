@@ -260,7 +260,7 @@ class BotServer(BaseHTTPRequestHandler):
     def do_POST(self):
         """Обработка POST запросов"""
         try:
-    if self.path == '/webhook':
+            if self.path == '/webhook':  # ⬅️ 4 пробела отступа
         # ... весь код обработки вебхука с отступом +4 пробела ...
     # ========== НОВЫЙ КОД (замените старый) ==========
     content_len = int(self.headers.get('Content-Length', 0))
