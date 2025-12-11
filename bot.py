@@ -2,81 +2,96 @@ import os
 import asyncio
 import logging
 import sys
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram.ext import Application, CommandHandler
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# ==================== ЧИСТОЕ ЛОГИРОВАНИЕ ====================
+class CleanFormatter(logging.Formatter):
+    def format(self, record):
+        # Убираем все объектные представления из сообщений
+        message = record.getMessage()
+        # Убираем возможные представления объектов в сообщениях
+        if 'object at 0x' in message:
+            message = message.split('object at 0x')[0].strip()
+        record.msg = message
+        return super().format(record)
 
-# Получаем токен
-TOKEN = os.environ.get('BOT_TOKEN')
-if not TOKEN:
-    logger.error("❌ ОШИБКА: Токен не найден! Проверьте переменную BOT_TOKEN в настройках Render.")
-    sys.exit(1)
+# Настройка логгера
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(CleanFormatter('%(asctime)s - %(message)s', datefmt='%H:%M:%S'))
 
-# Основные функции бота
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+logger.handlers = [handler]  # Заменяем все обработчики
+
+# Отключаем ненужные логи
+logging.getLogger('http.server').disabled = True
+logging.getLogger('telegram').setLevel(logging.ERROR)
+
+# ==================== HTTP СЕРВЕР ====================
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, *args):
+        pass  # Без логов
+
+def run_http_server(port=8080):
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    print(f"HTTP сервер запущен на порту {port}")
+    server.serve_forever()
+
+# ==================== ФУНКЦИИ БОТА ====================
 async def start(update, context):
-    await update.message.reply_text('✅ Бот успешно работает на Render!')
+    await update.message.reply_text('🚀 Бот запущен')
 
-async def help(update, context):
-    await update.message.reply_text('/start - Запустить бота\n/help - Эта справка')
+async def help_cmd(update, context):
+    await update.message.reply_text('/start, /help, /id')
 
-# Функция запуска бота
-async def run_bot():
-    """Асинхронная функция для запуска бота"""
-    try:
+async def get_id(update, context):
+    await update.message.reply_text(f'ID: {update.effective_user.id}')
+
+# ==================== ОСНОВНОЙ КОД ====================
+def main():
+    print("=== Запуск бота ===")
+    
+    TOKEN = os.environ.get('BOT_TOKEN')
+    if not TOKEN:
+        print("ОШИБКА: Нет токена")
+        sys.exit(1)
+    
+    # HTTP сервер
+    port = int(os.environ.get('PORT', 10000))
+    http_thread = threading.Thread(
+        target=run_http_server, 
+        args=(port,), 
+        daemon=True
+    )
+    http_thread.start()
+    
+    # Основной event loop
+    async def bot_main():
         app = Application.builder().token(TOKEN).build()
         app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("help", help))
+        app.add_handler(CommandHandler("help", help_cmd))
+        app.add_handler(CommandHandler("id", get_id))
         
-        logger.info("🤖 Запускаю polling бота...")
-        await app.run_polling(
-            drop_pending_updates=True,
-            close_loop=False  # Ключевой параметр!
-        )
-    except Exception as e:
-        logger.error(f"Ошибка в run_bot: {e}")
-        raise
-
-# Главная функция
-def main():
-    """Основная точка входа, совместимая с Render"""
-    logger.info("🚀 Инициализация бота...")
+        print("Бот запускается...")
+        await app.run_polling(drop_pending_updates=True, close_loop=False)
     
     try:
-        # Проверяем, есть ли уже запущенный event loop
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # Если loop уже запущен, запускаем задачу внутри него
-        if loop.is_running():
-            logger.info("🔄 Использую существующий event loop Render")
-            task = loop.create_task(run_bot())
-            
-            # Ждем завершения задачи (блокирующий вызов)
-            try:
-                loop.run_until_complete(task)
-            except KeyboardInterrupt:
-                logger.info("⏹️ Получен сигнал прерывания")
-            except Exception as e:
-                logger.error(f"Ошибка при выполнении задачи: {e}")
-        else:
-            # Если loop не запущен, запускаем стандартно
-            logger.info("🆕 Создаю новый event loop")
-            loop.run_until_complete(run_bot())
-            
+        asyncio.run(bot_main())
     except KeyboardInterrupt:
-        logger.info("⏹️ Бот остановлен пользователем")
+        print("Бот остановлен")
     except Exception as e:
-        logger.error(f"💥 Фатальная ошибка: {e}")
-        sys.exit(1)
+        print(f"Ошибка: {str(e)}")
 
-# Точка входа
 if __name__ == '__main__':
     main()
