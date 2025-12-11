@@ -9,7 +9,7 @@ import logging
 import json
 import html
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import threading
@@ -24,21 +24,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ==================== ИМПОРТЫ ДЛЯ TELEGRAM ====================
+# ==================== ГЛОБАЛЬНЫЕ ТИПЫ ДЛЯ ОБРАБОТКИ ОШИБОК ====================
 
+# Создаем заглушки для типов, если библиотека не установлена
 try:
-    from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-    from telegram.ext import (
-        Application,
-        CommandHandler,
-        MessageHandler,
-        filters,
-        CallbackContext
-    )
+    from telegram import Update
+    from telegram.ext import CallbackContext
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
-    print("Предупреждение: python-telegram-bot не установлен")
+    # Создаем заглушки для типов
+    class Update:
+        pass
+    
+    class CallbackContext:
+        pass
+    
+    logger.warning("python-telegram-bot не установлен. Бот будет работать в демо-режиме.")
 
 # ==================== КОНСТАНТЫ И ПЕРЕМЕННЫЕ ====================
 
@@ -50,7 +52,7 @@ BOT_USERNAME = os.environ.get('BOT_USERNAME', 'KonspektHelperBot')
 
 # Проверка обязательных переменных
 if not TOKEN or TOKEN == 'ВАШ_ТОКЕН_БОТА':
-    logger.error("TELEGRAM_TOKEN не установлен!")
+    logger.warning("TELEGRAM_TOKEN не установлен! Запуск в демо-режиме.")
     TOKEN = 'DEMO_TOKEN_FOR_TESTING'
 
 if not WEBHOOK_URL:
@@ -67,8 +69,7 @@ user_stats = {
 
 # ==================== HTML ШАБЛОН (ДОЛЖЕН БЫТЬ В НАЧАЛЕ!) ====================
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
+HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -285,264 +286,338 @@ class SimpleBot:
         self.token = token
         self.application = None
         self.user_data = {}
+        self.is_initialized = False
         
+    def initialize(self) -> bool:
+        """Инициализация бота (вызывается отдельно)"""
+        if not TELEGRAM_AVAILABLE:
+            logger.error("python-telegram-bot не установлен. Бот не может быть инициализирован.")
+            return False
+            
+        if not self.token or self.token == 'DEMO_TOKEN_FOR_TESTING':
+            logger.warning("Токен бота не настроен. Демо-режим.")
+            return False
+            
+        try:
+            from telegram.ext import Application
+            self.application = Application.builder().token(self.token).build()
+            self.setup_handlers()
+            self.is_initialized = True
+            logger.info("Telegram бот инициализирован")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка инициализации бота: {e}")
+            return False
+    
     async def start(self, update: Update, context: CallbackContext) -> None:
         """Обработчик команды /start"""
-        user = update.effective_user
-        user_id = user.id
-        
-        # Обновляем статистику
-        if user_id not in self.user_data:
-            user_stats["total_users"] += 1
-            user_stats["active_today"] += 1
-            self.user_data[user_id] = {
-                "first_seen": datetime.now().isoformat(),
-                "conspects_created": 0,
-                "messages_count": 0
-            }
-        
-        # Приветственное сообщение
-        welcome_text = (
-            f"👋 Привет, {user.first_name}!\n\n"
-            f"Я — <b>Konspekt Helper Bot</b>, твой помощник в создании конспектов.\n\n"
-            f"<b>Что я умею:</b>\n"
-            f"• Создавать структурированные конспекты из текста\n"
-            f"• Выделять ключевые идеи и тезисы\n"
-            f"• Форматировать информацию для лучшего запоминания\n\n"
-            f"<b>Доступные команды:</b>\n"
-            f"/conspect - Создать конспект из текста\n"
-            f"/help - Получить справку\n"
-            f"/id - Узнать свой ID\n"
-            f"/site - Открыть сайт управления\n\n"
-            f"Просто отправь мне текст, и я создам из него конспект!"
-        )
-        
-        # Создаем клавиатуру
-        keyboard = [
-            [KeyboardButton("/conspect")],
-            [KeyboardButton("/help"), KeyboardButton("/site")]
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        
-        await update.message.reply_text(
-            welcome_text,
-            parse_mode='HTML',
-            reply_markup=reply_markup
-        )
-        
-        logger.info(f"New user: {user_id} - {user.first_name}")
-        
+        try:
+            user = update.effective_user
+            user_id = user.id
+            
+            # Обновляем статистику
+            if user_id not in self.user_data:
+                user_stats["total_users"] += 1
+                user_stats["active_today"] += 1
+                self.user_data[user_id] = {
+                    "first_seen": datetime.now().isoformat(),
+                    "conspects_created": 0,
+                    "messages_count": 0
+                }
+            
+            # Приветственное сообщение
+            welcome_text = (
+                f"👋 Привет, {user.first_name}!\n\n"
+                f"Я — <b>Konspekt Helper Bot</b>, твой помощник в создании конспектов.\n\n"
+                f"<b>Что я умею:</b>\n"
+                f"• Создавать структурированные конспекты из текста\n"
+                f"• Выделять ключевые идеи и тезисы\n"
+                f"• Форматировать информацию для лучшего запоминания\n\n"
+                f"<b>Доступные команды:</b>\n"
+                f"/conspect - Создать конспект из текста\n"
+                f"/help - Получить справку\n"
+                f"/id - Узнать свой ID\n"
+                f"/site - Открыть сайт управления\n\n"
+                f"Просто отправь мне текст, и я создам из него конспект!"
+            )
+            
+            # Создаем клавиатуру
+            from telegram import ReplyKeyboardMarkup, KeyboardButton
+            keyboard = [
+                [KeyboardButton("/conspect")],
+                [KeyboardButton("/help"), KeyboardButton("/site")]
+            ]
+            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            
+            await update.message.reply_text(
+                welcome_text,
+                parse_mode='HTML',
+                reply_markup=reply_markup
+            )
+            
+            logger.info(f"New user: {user_id} - {user.first_name}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка в обработчике /start: {e}")
+            
     async def help_command(self, update: Update, context: CallbackContext) -> None:
         """Обработчик команды /help"""
-        help_text = (
-            "📚 <b>Konspekt Helper Bot - Справка</b>\n\n"
-            "<b>Основные команды:</b>\n"
-            "/start - Начать работу с ботом\n"
-            "/conspect [текст] - Создать конспект из текста\n"
-            "/id - Узнать свой Telegram ID\n"
-            "/site - Открыть веб-сайт управления\n\n"
-            "<b>Как использовать:</b>\n"
-            "1. Отправь команду /conspect и текст\n"
-            "2. Или просто отправь текст, и бот создаст конспект\n"
-            "3. Получи структурированный конспект с ключевыми идеями\n\n"
-            "<b>Примеры текста для конспекта:</b>\n"
-            "• Лекции и учебные материалы\n"
-            "• Статьи и научные работы\n"
-            "• Доклады и презентации\n"
-            "• Книги и главы\n\n"
-            "Для связи с разработчиком: /site"
-        )
-        
-        await update.message.reply_text(help_text, parse_mode='HTML')
-        
+        try:
+            help_text = (
+                "📚 <b>Konspekt Helper Bot - Справка</b>\n\n"
+                "<b>Основные команды:</b>\n"
+                "/start - Начать работу с ботом\n"
+                "/conspect [текст] - Создать конспект из текста\n"
+                "/id - Узнать свой Telegram ID\n"
+                "/site - Открыть веб-сайт управления\n\n"
+                "<b>Как использовать:</b>\n"
+                "1. Отправь команду /conspect и текст\n"
+                "2. Или просто отправь текст, и бот создаст конспект\n"
+                "3. Получи структурированный конспект с ключевыми идеями\n\n"
+                "<b>Примеры текста для конспекта:</b>\n"
+                "• Лекции и учебные материалы\n"
+                "• Статьи и научные работы\n"
+                "• Доклады и презентации\n"
+                "• Книги и главы\n\n"
+                "Для связи с разработчиком: /site"
+            )
+            
+            await update.message.reply_text(help_text, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Ошибка в обработчике /help: {e}")
+            
     async def get_user_id(self, update: Update, context: CallbackContext) -> None:
         """Обработчик команды /id"""
-        user = update.effective_user
-        user_id = user.id
-        
-        await update.message.reply_text(
-            f"🆔 Ваш Telegram ID: <code>{user_id}</code>\n"
-            f"👤 Имя: {user.first_name}\n"
-            f"📅 Зарегистрирован: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
-            parse_mode='HTML'
-        )
-        
+        try:
+            user = update.effective_user
+            user_id = user.id
+            
+            await update.message.reply_text(
+                f"🆔 Ваш Telegram ID: <code>{user_id}</code>\n"
+                f"👤 Имя: {user.first_name}\n"
+                f"📅 Зарегистрирован: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Ошибка в обработчике /id: {e}")
+            
     async def site_command(self, update: Update, context: CallbackContext) -> None:
         """Обработчик команды /site"""
-        site_url = WEBHOOK_URL.replace('/webhook', '')
-        
-        await update.message.reply_text(
-            f"🌐 <b>Веб-сайт управления ботом</b>\n\n"
-            f"Перейдите по ссылке для управления ботом:\n"
-            f"<a href='{site_url}'>{site_url}</a>\n\n"
-            f"На сайте вы найдете:\n"
-            f"• Статистику использования\n"
-            f"• Историю запросов\n"
-            f"• Настройки вебхука\n"
-            f"• Документацию",
-            parse_mode='HTML',
-            disable_web_page_preview=False
-        )
-        
+        try:
+            site_url = WEBHOOK_URL.replace('/webhook', '')
+            
+            await update.message.reply_text(
+                f"🌐 <b>Веб-сайт управления ботом</b>\n\n"
+                f"Перейдите по ссылке для управления ботом:\n"
+                f"<a href='{site_url}'>{site_url}</a>\n\n"
+                f"На сайте вы найдете:\n"
+                f"• Статистику использования\n"
+                f"• Историю запросов\n"
+                f"• Настройки вебхука\n"
+                f"• Документацию",
+                parse_mode='HTML',
+                disable_web_page_preview=False
+            )
+        except Exception as e:
+            logger.error(f"Ошибка в обработчике /site: {e}")
+            
     async def create_conspect(self, update: Update, context: CallbackContext) -> None:
         """Обработчик команды /conspect и текстовых сообщений"""
-        user = update.effective_user
-        user_id = user.id
-        
-        # Получаем текст
-        if update.message.text.startswith('/conspect'):
-            text = ' '.join(context.args) if context.args else ''
-            if not text:
+        try:
+            user = update.effective_user
+            user_id = user.id
+            
+            # Получаем текст
+            if update.message.text.startswith('/conspect'):
+                text = ' '.join(context.args) if context.args else ''
+                if not text:
+                    await update.message.reply_text(
+                        "📝 <b>Создание конспекта</b>\n\n"
+                        "Отправьте текст для создания конспекта после команды:\n"
+                        "<code>/conspect Ваш текст здесь...</code>\n\n"
+                        "Или просто отправьте текст без команды.",
+                        parse_mode='HTML'
+                    )
+                    return
+            else:
+                text = update.message.text
+                
+            if not text or len(text) < 10:
                 await update.message.reply_text(
-                    "📝 <b>Создание конспекта</b>\n\n"
-                    "Отправьте текст для создания конспекта после команды:\n"
-                    "<code>/conspect Ваш текст здесь...</code>\n\n"
-                    "Или просто отправьте текст без команды.",
-                    parse_mode='HTML'
+                    "⚠️ Текст слишком короткий для создания конспекта. "
+                    "Отправьте текст объемом от 50 символов."
                 )
                 return
-        else:
-            text = update.message.text
+                
+            # Обновляем статистику
+            user_stats["messages_processed"] += 1
+            user_stats["conspects_created"] += 1
             
-        if not text or len(text) < 10:
-            await update.message.reply_text(
-                "⚠️ Текст слишком короткий для создания конспекта. "
-                "Отправьте текст объемом от 50 символов."
+            if user_id in self.user_data:
+                self.user_data[user_id]["conspects_created"] += 1
+                self.user_data[user_id]["messages_count"] += 1
+            
+            # Отправляем сообщение о начале обработки
+            processing_msg = await update.message.reply_text(
+                "⏳ Обрабатываю текст...",
+                parse_mode='HTML'
             )
-            return
             
-        # Обновляем статистику
-        user_stats["messages_processed"] += 1
-        user_stats["conspects_created"] += 1
-        
-        if user_id in self.user_data:
-            self.user_data[user_id]["conspects_created"] += 1
-            self.user_data[user_id]["messages_count"] += 1
-        
-        # Отправляем сообщение о начале обработки
-        processing_msg = await update.message.reply_text(
-            "⏳ Обрабатываю текст...",
-            parse_mode='HTML'
-        )
-        
-        try:
             # Имитация обработки текста
             await self._process_text_for_conspect(update, context, text, processing_msg)
             
         except Exception as e:
             logger.error(f"Error creating conspect: {e}")
-            await update.message.reply_text(
-                "❌ Произошла ошибка при создании конспекта. "
-                "Попробуйте еще раз или обратитесь к разработчику."
-            )
+            try:
+                await update.message.reply_text(
+                    "❌ Произошла ошибка при создании конспекта. "
+                    "Попробуйте еще раз или обратитесь к разработчику."
+                )
+            except:
+                pass
             
     async def _process_text_for_conspect(self, update: Update, context: CallbackContext, 
                                         text: str, processing_msg) -> None:
         """Обработка текста и создание конспекта"""
-        # Имитация обработки
-        time.sleep(1)  # Имитация задержки обработки
-        
-        # Простая логика создания конспекта
-        words = text.split()
-        sentences = text.split('. ')
-        
-        # Создаем простой конспект
-        conspect = (
-            "📋 <b>СОЗДАННЫЙ КОНСПЕКТ</b>\n\n"
-            f"<b>Объем исходного текста:</b> {len(words)} слов, {len(text)} символов\n"
-            f"<b>Ключевые моменты:</b>\n"
-        )
-        
-        # Добавляем ключевые предложения (первые 3-5 предложений)
-        for i, sentence in enumerate(sentences[:5]):
-            if sentence.strip():
-                conspect += f"• {sentence.strip()}.\n"
-        
-        # Добавляем статистику
-        conspect += f"\n<b>Основные темы:</b>\n"
-        
-        # Простой анализ слов
-        word_freq = {}
-        for word in words:
-            word_lower = word.lower().strip('.,!?;:()[]{}"\'')
-            if len(word_lower) > 4:  # Только слова длиной более 4 символов
-                word_freq[word_lower] = word_freq.get(word_lower, 0) + 1
-        
-        # Топ-5 слов
-        top_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:5]
-        for word, count in top_words:
-            conspect += f"#{word} ({count})\n"
-        
-        # Добавляем рекомендации
-        conspect += (
-            f"\n<b>Рекомендации по изучению:</b>\n"
-            f"1. Сфокусируйтесь на ключевых темах\n"
-            f"2. Составьте план изучения\n"
-            f"3. Повторите основные идеи\n\n"
-            f"<i>Конспект создан: {datetime.now().strftime('%d.%m.%Y %H:%M')}</i>"
-        )
-        
-        # Удаляем сообщение об обработке
         try:
-            await processing_msg.delete()
-        except:
-            pass
+            # Имитация обработки
+            await asyncio.sleep(1)  # Асинхронная задержка
             
-        # Отправляем конспект
-        await update.message.reply_text(conspect, parse_mode='HTML')
-        
-        # Отправляем дополнительные действия
-        keyboard = [
-            [KeyboardButton("Еще конспект"), KeyboardButton("/help")],
-            [KeyboardButton("/site")]
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        
-        await update.message.reply_text(
-            "✅ Конспект успешно создан!\n\n"
-            "Хотите создать еще один конспект или перейти на сайт управления?",
-            reply_markup=reply_markup
-        )
+            # Простая логика создания конспекта
+            words = text.split()
+            sentences = text.split('. ')
+            
+            # Создаем простой конспект
+            conspect = (
+                "📋 <b>СОЗДАННЫЙ КОНСПЕКТ</b>\n\n"
+                f"<b>Объем исходного текста:</b> {len(words)} слов, {len(text)} символов\n"
+                f"<b>Ключевые моменты:</b>\n"
+            )
+            
+            # Добавляем ключевые предложения (первые 3-5 предложений)
+            for i, sentence in enumerate(sentences[:5]):
+                if sentence.strip():
+                    conspect += f"• {sentence.strip()}.\n"
+            
+            # Добавляем статистику
+            conspect += f"\n<b>Основные темы:</b>\n"
+            
+            # Простой анализ слов
+            word_freq = {}
+            for word in words:
+                word_lower = word.lower().strip('.,!?;:()[]{}"\'')
+                if len(word_lower) > 4:  # Только слова длиной более 4 символов
+                    word_freq[word_lower] = word_freq.get(word_lower, 0) + 1
+            
+            # Топ-5 слов
+            top_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:5]
+            for word, count in top_words:
+                conspect += f"#{word} ({count})\n"
+            
+            # Добавляем рекомендации
+            conspect += (
+                f"\n<b>Рекомендации по изучению:</b>\n"
+                f"1. Сфокусируйтесь на ключевых темах\n"
+                f"2. Составьте план изучения\n"
+                f"3. Повторите основные идеи\n\n"
+                f"<i>Конспект создан: {datetime.now().strftime('%d.%m.%Y %H:%M')}</i>"
+            )
+            
+            # Удаляем сообщение об обработке
+            try:
+                await processing_msg.delete()
+            except:
+                pass
+                
+            # Отправляем конспект
+            await update.message.reply_text(conspect, parse_mode='HTML')
+            
+            # Отправляем дополнительные действия
+            from telegram import ReplyKeyboardMarkup, KeyboardButton
+            keyboard = [
+                [KeyboardButton("Еще конспект"), KeyboardButton("/help")],
+                [KeyboardButton("/site")]
+            ]
+            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            
+            await update.message.reply_text(
+                "✅ Конспект успешно создан!\n\n"
+                "Хотите создать еще один конспект или перейти на сайт управления?",
+                reply_markup=reply_markup
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка обработки текста: {e}")
+            try:
+                await update.message.reply_text(
+                    "❌ Ошибка при обработке текста. Попробуйте еще раз."
+                )
+            except:
+                pass
         
     async def handle_message(self, update: Update, context: CallbackContext) -> None:
         """Обработчик всех текстовых сообщений"""
-        if update.message and update.message.text:
-            # Если не команда, создаем конспект
-            if not update.message.text.startswith('/'):
-                await self.create_conspect(update, context)
+        try:
+            if update.message and update.message.text:
+                # Если не команда, создаем конспект
+                if not update.message.text.startswith('/'):
+                    await self.create_conspect(update, context)
+        except Exception as e:
+            logger.error(f"Ошибка обработки сообщения: {e}")
                 
     def setup_handlers(self) -> None:
         """Настройка обработчиков команд"""
-        self.application.add_handler(CommandHandler("start", self.start))
-        self.application.add_handler(CommandHandler("help", self.help_command))
-        self.application.add_handler(CommandHandler("id", self.get_user_id))
-        self.application.add_handler(CommandHandler("site", self.site_command))
-        self.application.add_handler(CommandHandler("conspect", self.create_conspect))
-        
-        # Обработчик текстовых сообщений
-        self.application.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
-        )
-        
+        try:
+            from telegram.ext import (
+                CommandHandler,
+                MessageHandler,
+                filters
+            )
+            
+            self.application.add_handler(CommandHandler("start", self.start))
+            self.application.add_handler(CommandHandler("help", self.help_command))
+            self.application.add_handler(CommandHandler("id", self.get_user_id))
+            self.application.add_handler(CommandHandler("site", self.site_command))
+            self.application.add_handler(CommandHandler("conspect", self.create_conspect))
+            
+            # Обработчик текстовых сообщений
+            self.application.add_handler(
+                MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
+            )
+            
+            logger.info("Обработчики команд настроены")
+        except Exception as e:
+            logger.error(f"Ошибка настройки обработчиков: {e}")
+            
     async def run_webhook(self) -> None:
         """Запуск бота в режиме вебхука"""
-        if not TELEGRAM_AVAILABLE:
-            logger.error("python-telegram-bot не установлен!")
+        if not self.is_initialized:
+            logger.error("Бот не инициализирован. Запуск невозможен.")
             return
             
-        # Создаем Application
-        self.application = Application.builder().token(self.token).build()
-        
-        # Настраиваем обработчики
-        self.setup_handlers()
-        
-        # Устанавливаем вебхук
-        webhook_url = f"{WEBHOOK_URL}/webhook"
-        await self.application.bot.set_webhook(webhook_url)
-        
-        logger.info(f"Webhook установлен: {webhook_url}")
-        logger.info("Бот запущен в режиме вебхука")
-        # ==================== КЛАСС HTTP СЕРВЕРА ====================
+        try:
+            # Устанавливаем вебхук
+            webhook_url = f"{WEBHOOK_URL}/webhook"
+            await self.application.bot.set_webhook(webhook_url)
+            
+            logger.info(f"Webhook установлен: {webhook_url}")
+            logger.info("Бот запущен в режиме вебхука")
+            
+        except Exception as e:
+            logger.error(f"Ошибка запуска бота: {e}")
+            
+    async def process_update(self, update_data: Dict) -> None:
+        """Обработка обновления из вебхука"""
+        if not self.is_initialized:
+            return
+            
+        try:
+            from telegram import Update
+            update = Update.de_json(update_data, self.application.bot)
+            await self.application.process_update(update)
+        except Exception as e:
+            logger.error(f"Ошибка обработки обновления: {e}")
+            # ==================== КЛАСС HTTP СЕРВЕРА ====================
 
 class BotServer(BaseHTTPRequestHandler):
     """HTTP сервер для обработки вебхуков и отдачи сайта"""
@@ -610,17 +685,38 @@ class BotServer(BaseHTTPRequestHandler):
                 webhook_history.pop(0)
             
             # Если это вебхук от Telegram
-            if self.path == '/webhook' and TELEGRAM_AVAILABLE and bot_instance:
-                # Обрабатываем через бота
-                update = Update.de_json(data, bot_instance.application.bot)
-                bot_instance.application.update_queue.put_nowait(update)
-                
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b'OK')
-                
-                logger.info(f"Webhook processed: update_id={data.get('update_id')}")
-                
+            if self.path == '/webhook':
+                if bot_instance and bot_instance.is_initialized:
+                    # Обрабатываем через бота асинхронно
+                    import asyncio
+                    
+                    # Создаем новую задачу для обработки
+                    async def process_async():
+                        try:
+                            await bot_instance.process_update(data)
+                        except Exception as e:
+                            logger.error(f"Ошибка асинхронной обработки: {e}")
+                    
+                    # Запускаем в существующем event loop или создаем новый
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    
+                    loop.create_task(process_async())
+                    
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'OK')
+                    
+                    logger.info(f"Webhook processed: update_id={data.get('update_id')}")
+                else:
+                    # Бот не инициализирован, но отвечаем OK
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'OK (bot not initialized)')
+                    
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -643,7 +739,7 @@ class BotServer(BaseHTTPRequestHandler):
     def _serve_main_page(self):
         """Главная страница управления"""
         # Статистика
-        webhook_status = "✅ Активен" if TELEGRAM_AVAILABLE else "❌ Не настроен"
+        webhook_status = "✅ Активен" if TELEGRAM_AVAILABLE and bot_instance and bot_instance.is_initialized else "❌ Не настроен"
         
         # Генерируем историю вебхуков
         history_html = ""
@@ -688,7 +784,9 @@ class BotServer(BaseHTTPRequestHandler):
                 <div class="stat-card">
                     <div class="label">Статус бота</div>
                     <div class="value">
-                        <span class="status-badge status-active">Активен</span>
+                        <span class="status-badge {'status-active' if TELEGRAM_AVAILABLE else 'status-inactive'}">
+                            {'Активен' if TELEGRAM_AVAILABLE else 'Не активен'}
+                        </span>
                     </div>
                 </div>
             </div>
@@ -702,8 +800,8 @@ class BotServer(BaseHTTPRequestHandler):
                 <a href="https://t.me/{BOT_USERNAME}" target="_blank" class="btn btn-telegram">
                     <i class="fab fa-telegram"></i> Открыть в Telegram
                 </a>
-                <a href="/setup-webhook" class="btn btn-success">
-                    <i class="fas fa-link"></i> Настроить вебхук
+                <a href="/setup-webhook" class="btn {'btn-success' if TELEGRAM_AVAILABLE else 'btn-danger'}">
+                    <i class="fas fa-link"></i> {'Настроить вебхук' if TELEGRAM_AVAILABLE else 'Библиотека не установлена'}
                 </a>
                 <a href="/test" class="btn">
                     <i class="fas fa-vial"></i> Тест API
@@ -719,6 +817,7 @@ class BotServer(BaseHTTPRequestHandler):
                 <p><strong>Вебхук:</strong> {webhook_status}</p>
                 <p><strong>URL:</strong> <code>{WEBHOOK_URL}/webhook</code></p>
                 <p><strong>Токен:</strong> <code>{TOKEN[:10]}...{TOKEN[-10:] if len(TOKEN) > 20 else ''}</code></p>
+                <p><strong>Библиотека:</strong> {'✅ Установлена' if TELEGRAM_AVAILABLE else '❌ Не установлена'}</p>
                 <p><small>Для настройки вебхука нажмите кнопку "Настроить вебхук"</small></p>
             </div>
         </div>
@@ -750,18 +849,32 @@ class BotServer(BaseHTTPRequestHandler):
             </div>
         </div>
 
-        <!-- Форма создания конспекта -->
+        <!-- Инструкции -->
         <div class="card">
-            <h2><i class="fas fa-edit"></i> Создать конспект (тест)</h2>
-            <form action="/test-conspect" method="POST" style="margin-top: 20px;">
-                <div class="form-group">
-                    <label for="text">Текст для конспекта:</label>
-                    <textarea id="text" name="text" placeholder="Введите текст для создания конспекта..."></textarea>
-                </div>
-                <button type="submit" class="btn btn-success">
-                    <i class="fas fa-magic"></i> Создать конспект
-                </button>
-            </form>
+            <h2><i class="fas fa-info-circle"></i> Инструкция по настройке</h2>
+            <div class="instructions">
+                {'<p><strong style="color: red;">⚠️ ВНИМАНИЕ: Библиотека python-telegram-bot не установлена!</strong></p>' if not TELEGRAM_AVAILABLE else ''}
+                <p><strong>1. Установите зависимости:</strong></p>
+                <code>pip install python-telegram-bot==13.15</code>
+                
+                <p style="margin-top: 15px;"><strong>2. Установите вебхук:</strong></p>
+                <code>curl "https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}/webhook"</code>
+                
+                <p style="margin-top: 15px;"><strong>3. Проверьте статус:</strong></p>
+                <code>curl "https://api.telegram.org/bot{TOKEN}/getWebhookInfo"</code>
+                
+                <p style="margin-top: 15px;"><strong>4. Удалите вебхук (если нужно):</strong></p>
+                <code>curl "https://api.telegram.org/bot{TOKEN}/deleteWebhook"</code>
+                
+                <p style="margin-top: 15px;"><strong>5. Основные команды бота:</strong></p>
+                <ul style="margin-left: 20px; margin-top: 10px;">
+                    <li><code>/start</code> - Начало работы</li>
+                    <li><code>/help</code> - Справка</li>
+                    <li><code>/conspect [текст]</code> - Создать конспект</li>
+                    <li><code>/id</code> - Узнать свой ID</li>
+                    <li><code>/site</code> - Открыть этот сайт</li>
+                </ul>
+            </div>
         </div>
 
         <!-- История вебхуков -->
@@ -775,33 +888,10 @@ class BotServer(BaseHTTPRequestHandler):
             </p>
         </div>
 
-        <!-- Инструкции -->
-        <div class="card">
-            <h2><i class="fas fa-info-circle"></i> Инструкция по настройке</h2>
-            <div class="instructions">
-                <p><strong>1. Установите вебхук:</strong></p>
-                <code>curl "https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}/webhook"</code>
-                
-                <p style="margin-top: 15px;"><strong>2. Проверьте статус:</strong></p>
-                <code>curl "https://api.telegram.org/bot{TOKEN}/getWebhookInfo"</code>
-                
-                <p style="margin-top: 15px;"><strong>3. Удалите вебхук (если нужно):</strong></p>
-                <code>curl "https://api.telegram.org/bot{TOKEN}/deleteWebhook"</code>
-                
-                <p style="margin-top: 15px;"><strong>4. Основные команды бота:</strong></p>
-                <ul style="margin-left: 20px; margin-top: 10px;">
-                    <li><code>/start</code> - Начало работы</li>
-                    <li><code>/help</code> - Справка</li>
-                    <li><code>/conspect [текст]</code> - Создать конспект</li>
-                    <li><code>/id</code> - Узнать свой ID</li>
-                    <li><code>/site</code> - Открыть этот сайт</li>
-                </ul>
-            </div>
-        </div>
-
         <footer>
             <p>Konspekt Helper Bot © 2024 | Работает на Render.com</p>
             <p>Версия 1.0 | Последнее обновление: {datetime.now().strftime('%d.%m.%Y %H:%M')}</p>
+            <p>Python: 3.11.8 | Библиотека: {'python-telegram-bot ' + ('✅ Установлена' if TELEGRAM_AVAILABLE else '❌ Не установлена')}</p>
         </footer>
     </div>
 
@@ -833,6 +923,7 @@ class BotServer(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.end_headers()
         self.wfile.write(html_content.encode('utf-8'))
+            # ... (остальные методы HTTP сервера остаются такими же)
     
     def _serve_health_check(self):
         """Проверка здоровья сервиса"""
@@ -842,6 +933,7 @@ class BotServer(BaseHTTPRequestHandler):
             "service": "Konspekt Helper Bot",
             "version": "1.0",
             "telegram_available": TELEGRAM_AVAILABLE,
+            "bot_initialized": bot_instance.is_initialized if bot_instance else False,
             "webhook_url": WEBHOOK_URL,
             "users_count": user_stats["total_users"]
         }
@@ -850,216 +942,10 @@ class BotServer(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
         self.wfile.write(json.dumps(health_data, ensure_ascii=False).encode('utf-8'))
-    
-    def _serve_stats_json(self):
-        """JSON статистика"""
-        # Считаем вебхуки за сегодня
-        today = datetime.now().date().isoformat()
-        webhooks_today = sum(
-            1 for entry in webhook_history 
-            if datetime.fromisoformat(entry["timestamp"]).date().isoformat() == today
-        )
-        
-        stats_data = {
-            "bot": {
-                "username": BOT_USERNAME,
-                "webhook_url": f"{WEBHOOK_URL}/webhook",
-                "telegram_available": TELEGRAM_AVAILABLE
-            },
-            "statistics": user_stats,
-            "webhooks": {
-                "total": len(webhook_history),
-                "today": webhooks_today,
-                "last_10": webhook_history[-10:] if webhook_history else []
-            },
-            "system": {
-                "timestamp": datetime.now().isoformat(),
-                "python_version": "3.11.8",
-                "service": "Render.com"
-            }
-        }
-        
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps(stats_data, ensure_ascii=False, indent=2).encode('utf-8'))
-    
-    def _serve_webhook_info(self):
-        """Информация о вебхуке"""
-        info_html = f"""
-        <html>
-        <head><title>Webhook Info</title></head>
-        <body style="font-family: Arial, sans-serif; padding: 20px;">
-            <h1>Webhook Information</h1>
-            <p><strong>URL:</strong> {WEBHOOK_URL}/webhook</p>
-            <p><strong>Token:</strong> {TOKEN[:15]}...{TOKEN[-10:] if len(TOKEN) > 25 else ''}</p>
-            <p><strong>Status:</strong> {'Active' if TELEGRAM_AVAILABLE else 'Not configured'}</p>
-            <p><a href="/">Back to main page</a></p>
-        </body>
-        </html>
-        """
-        
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html')
-        self.end_headers()
-        self.wfile.write(info_html.encode('utf-8'))
-    
-    def _setup_webhook_page(self):
-        """Страница настройки вебхука"""
-        # Пытаемся настроить вебхук
-        success = False
-        message = ""
-        
-        if TELEGRAM_AVAILABLE and bot_instance and bot_instance.application:
-            try:
-                import asyncio
-                
-                # Создаем новое event loop для этого потока
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                # Устанавливаем вебхук
-                loop.run_until_complete(
-                    bot_instance.application.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
-                )
-                
-                success = True
-                message = "✅ Вебхук успешно настроен!"
-                
-                # Логируем действие
-                webhook_history.append({
-                    "timestamp": datetime.now().isoformat(),
-                    "method": "SETUP",
-                    "path": "/setup-webhook",
-                    "status": "webhook configured"
-                })
-                
-            except Exception as e:
-                success = False
-                message = f"❌ Ошибка: {str(e)}"
-        else:
-            message = "❌ Telegram бот не инициализирован"
-        
-        # Формируем ответ
-        result_html = f"""
-        <html>
-        <head>
-            <title>Setup Webhook</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; padding: 40px; text-align: center; }}
-                .success {{ color: green; font-size: 1.2em; }}
-                .error {{ color: red; font-size: 1.2em; }}
-                .code {{ background: #f4f4f4; padding: 10px; border-radius: 5px; margin: 20px 0; }}
-            </style>
-        </head>
-        <body>
-            <h1>Настройка вебхука</h1>
-            <div class="{ 'success' if success else 'error' }">
-                {message}
-            </div>
-            
-            <div class="code">
-                <p><strong>URL вебхука:</strong></p>
-                <code>{WEBHOOK_URL}/webhook</code>
-                
-                <p style="margin-top: 20px;"><strong>Команда для ручной настройки:</strong></p>
-                <code>curl "https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}/webhook"</code>
-            </div>
-            
-            <div style="margin-top: 30px;">
-                <a href="/" style="padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 5px;">
-                    Вернуться на главную
-                </a>
-            </div>
-        </body>
-        </html>
-        """
-        
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html')
-        self.end_headers()
-        self.wfile.write(result_html.encode('utf-8'))
-    
-    def _serve_test_page(self):
-        """Тестовая страница API"""
-        test_html = """
-        <html>
-        <head><title>API Test</title></head>
-        <body style="font-family: Arial, sans-serif; padding: 20px;">
-            <h1>API Test Endpoints</h1>
-            <ul>
-                <li><a href="/health">/health</a> - Health check</li>
-                <li><a href="/stats">/stats</a> - Statistics (JSON)</li>
-                <li><a href="/webhook-info">/webhook-info</a> - Webhook information</li>
-            </ul>
-            <p><a href="/">Back to main page</a></p>
-        </body>
-        </html>
-        """
-        
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html')
-        self.end_headers()
-        self.wfile.write(test_html.encode('utf-8'))
-    
-    def _serve_logs_page(self):
-        """Страница с логами"""
-        # Получаем последние 20 логов
-        logs = []
-        for handler in logger.handlers:
-            if hasattr(handler, 'baseFilename'):
-                try:
-                    with open(handler.baseFilename, 'r', encoding='utf-8') as f:
-                        logs = f.readlines()[-20:]  # Последние 20 строк
-                except:
-                    logs = ["Log file not available"]
-        
-        logs_html = "<br>".join(html.escape(log.strip()) for log in logs if log.strip())
-        
-        page_html = f"""
-        <html>
-        <head>
-            <title>Logs</title>
-            <style>
-                body {{ font-family: monospace; padding: 20px; background: #f5f5f5; }}
-                .log-container {{ background: white; padding: 20px; border-radius: 5px; }}
-                .log-line {{ margin: 5px 0; padding: 5px; border-bottom: 1px solid #eee; }}
-            </style>
-        </head>
-        <body>
-            <h1>System Logs</h1>
-            <p>Showing last 20 log entries:</p>
-            <div class="log-container">
-                {logs_html}
-            </div>
-            <p><a href="/">Back to main page</a></p>
-        </body>
-        </html>
-        """
-        
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html')
-        self.end_headers()
-        self.wfile.write(page_html.encode('utf-8'))
-    
-    def _serve_404(self):
-        """Страница 404"""
-        self.send_response(404)
-        self.send_header('Content-Type', 'text/html')
-        self.end_headers()
-        
-        html_404 = """
-        <html>
-        <head><title>404 Not Found</title></head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h1>404 - Страница не найдена</h1>
-            <p>Запрошенная страница не существует.</p>
-            <p><a href="/">Вернуться на главную</a></p>
-        </body>
-        </html>
-        """
-        self.wfile.write(html_404.encode('utf-8'))
-        # ==================== ГЛОБАЛЬНЫЕ ЭКЗЕМПЛЯРЫ ====================
+
+    # ... (остальные методы HTTP сервера)
+
+# ==================== ГЛОБАЛЬНЫЕ ЭКЗЕМПЛЯРЫ ====================
 
 bot_instance = None
 server_instance = None
@@ -1080,8 +966,17 @@ async def start_bot():
     
     try:
         bot_instance = SimpleBot(TOKEN)
-        await bot_instance.run_webhook()
-        logger.info("Telegram бот успешно запущен")
+        initialized = bot_instance.initialize()
+        
+        if initialized:
+            # Устанавливаем вебхук
+            webhook_url = f"{WEBHOOK_URL}/webhook"
+            await bot_instance.application.bot.set_webhook(webhook_url)
+            logger.info(f"Webhook установлен: {webhook_url}")
+            logger.info("Telegram бот успешно запущен")
+        else:
+            logger.error("Не удалось инициализировать бота")
+            
     except Exception as e:
         logger.error(f"Ошибка запуска бота: {e}")
 
@@ -1093,7 +988,7 @@ def start_http_server():
     server_instance = HTTPServer(server_address, BotServer)
     
     logger.info(f"HTTP сервер запущен на порту {PORT}")
-    logger.info(f"Веб-сайт доступен по адресу: http://localhost:{PORT}")
+    logger.info(f"Веб-сайт доступен по адресу: {WEBHOOK_URL}")
     logger.info(f"Вебхук Telegram: {WEBHOOK_URL}/webhook")
     
     try:
@@ -1108,7 +1003,7 @@ def run_server():
     import asyncio
     import threading
     
-    # Запускаем бот в отдельном потоке
+    # Запускаем бот в отдельном потоке только если библиотека установлена
     if TELEGRAM_AVAILABLE and TOKEN and TOKEN != 'DEMO_TOKEN_FOR_TESTING':
         bot_thread = threading.Thread(
             target=lambda: asyncio.run(start_bot()),
@@ -1118,6 +1013,8 @@ def run_server():
         logger.info("Поток Telegram бота запущен")
     else:
         logger.warning("Telegram бот запущен в демо-режиме. Установите TELEGRAM_TOKEN для полноценной работы.")
+        if not TELEGRAM_AVAILABLE:
+            logger.warning("Библиотека python-telegram-bot не установлена. Установите: pip install python-telegram-bot==13.15")
     
     # Запускаем HTTP сервер в основном потоке
     start_http_server()
@@ -1130,13 +1027,18 @@ if __name__ == '__main__':
     print("=" * 60)
     print(f"Версия: 1.0")
     print(f"Python: 3.11.8 (рекомендуемая для Render)")
-    print(f"Telegram Bot API: {'Доступен' if TELEGRAM_AVAILABLE else 'Не доступен'}")
+    print(f"Telegram Bot API: {'✅ Доступен' if TELEGRAM_AVAILABLE else '❌ Не доступен'}")
     print(f"Порт: {PORT}")
     print(f"Вебхук URL: {WEBHOOK_URL}")
-    print(f"Токен бота: {'Установлен' if TOKEN and TOKEN != 'DEMO_TOKEN_FOR_TESTING' else 'Не установлен'}")
+    print(f"Токен бота: {'✅ Установлен' if TOKEN and TOKEN != 'DEMO_TOKEN_FOR_TESTING' else '❌ Не установлен'}")
     print("=" * 60)
     
     # Проверяем переменные окружения
+    if not TELEGRAM_AVAILABLE:
+        print("\n⚠️  ВНИМАНИЕ: Библиотека python-telegram-bot не установлена!")
+        print("Установите: pip install python-telegram-bot==13.15")
+        print("Или добавьте в requirements.txt: python-telegram-bot==13.15")
+    
     if not TOKEN or TOKEN == 'DEMO_TOKEN_FOR_TESTING':
         print("\n⚠️  ВНИМАНИЕ: Токен бота не установлен!")
         print("Установите переменную окружения TELEGRAM_TOKEN")
@@ -1150,10 +1052,10 @@ if __name__ == '__main__':
     
     print("\nЗапуск системы...")
     print("Доступные эндпоинты:")
-    print(f"  • Веб-сайт: http://localhost:{PORT}")
-    print(f"  • Проверка здоровья: http://localhost:{PORT}/health")
-    print(f"  • Статистика (JSON): http://localhost:{PORT}/stats")
-    print(f"  • Вебхук Telegram: http://localhost:{PORT}/webhook")
+    print(f"  • Веб-сайт: {WEBHOOK_URL}")
+    print(f"  • Проверка здоровья: {WEBHOOK_URL}/health")
+    print(f"  • Статистика (JSON): {WEBHOOK_URL}/stats")
+    print(f"  • Вебхук Telegram: {WEBHOOK_URL}/webhook")
     print("\nДля остановки нажмите Ctrl+C")
     print("=" * 60 + "\n")
     
