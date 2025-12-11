@@ -1,9 +1,8 @@
 import os
 import asyncio
 import logging
-import signal
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import sys
+from telegram.ext import Application, CommandHandler
 
 # Настройка логирования
 logging.basicConfig(
@@ -12,111 +11,72 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Получаем токен ИЗ НАСТРОЕК RENDER
+# Получаем токен
 TOKEN = os.environ.get('BOT_TOKEN')
-
 if not TOKEN:
-    logger.error("""
-    ⚠️  ТОКЕН БОТА НЕ НАЙДЕН!
-    
-    На Render необходимо добавить переменную окружения:
-    Key: BOT_TOKEN
-    Value: ваш_токен_бота
-    
-    Пример токена: 1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
-    """)
-    exit(1)
+    logger.error("❌ ОШИБКА: Токен не найден! Проверьте переменную BOT_TOKEN в настройках Render.")
+    sys.exit(1)
 
-logger.info("✅ Токен получен успешно!")
+# Основные функции бота
+async def start(update, context):
+    await update.message.reply_text('✅ Бот успешно работает на Render!')
 
-# Глобальная переменная для приложения
-application = None
+async def help(update, context):
+    await update.message.reply_text('/start - Запустить бота\n/help - Эта справка')
 
-# Функция для корректной остановки
-async def shutdown(signal=None):
-    """Корректная остановка бота"""
-    if signal:
-        logger.info(f"📴 Получен сигнал {signal.name}, останавливаю бота...")
-    
-    if application and application.running:
-        logger.info("🛑 Останавливаю polling...")
-        await application.stop()
-        
-        logger.info("⏳ Жду завершения обновлений...")
-        await application.updater.stop()
-        
-        logger.info("🔌 Закрываю приложение...")
-        await application.shutdown()
-    
-    logger.info("✅ Бот успешно остановлен")
-
-# Обработка сигналов остановки
-def signal_handler():
-    """Обработчик сигналов ОС"""
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, lambda s, f: asyncio.create_task(shutdown(s)))
-
-async def main():
-    """Главная функция запуска бота"""
-    global application
-    
+# Функция запуска бота
+async def run_bot():
+    """Асинхронная функция для запуска бота"""
     try:
-        logger.info("🚀 Начинаю запуск бота...")
+        app = Application.builder().token(TOKEN).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("help", help))
         
-        # 1. Создаем приложение бота
-        application = Application.builder().token(TOKEN).build()
-        logger.info("✅ Приложение создано")
-        
-        # 2. Добавляем обработчики команд
-        application.add_handler(CommandHandler("start", start_command))
-        application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(CommandHandler("id", id_command))
-        logger.info("✅ Обработчики команд добавлены")
-        
-        # 3. Настраиваем обработку сигналов
-        signal_handler()
-        
-        # 4. Запускаем бота
-        logger.info("=" * 50)
-        logger.info("🤖 БОТ УСПЕШНО ЗАПУЩЕН!")
-        logger.info("📡 Ожидаю сообщений от пользователей...")
-        logger.info("=" * 50)
-        
-        # Запускаем polling с правильной обработкой остановки
-        await application.run_polling(
-            allowed_updates=Update.ALL_TYPES,
+        logger.info("🤖 Запускаю polling бота...")
+        await app.run_polling(
             drop_pending_updates=True,
-            close_loop=False  # ВАЖНО: не закрываем цикл событий
+            close_loop=False  # Ключевой параметр!
         )
-        
-    except asyncio.CancelledError:
-        logger.info("⏹️  Работа бота отменена")
     except Exception as e:
-        logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА: {e}")
+        logger.error(f"Ошибка в run_bot: {e}")
         raise
 
-# ==================== ПРОСТЫЕ ФУНКЦИИ БОТА ====================
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка команды /start"""
-    await update.message.reply_text('✅ Бот работает на Render!')
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка команды /help"""
-    await update.message.reply_text('/start - запустить бота\n/help - помощь\n/id - ваш ID')
-
-async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка команды /id"""
-    await update.message.reply_text(f'Ваш ID: {update.effective_user.id}')
-
-# ==================== ТОЧКА ВХОДА ====================
-
-if __name__ == '__main__':
+# Главная функция
+def main():
+    """Основная точка входа, совместимая с Render"""
+    logger.info("🚀 Инициализация бота...")
+    
     try:
-        # Запускаем главную функцию
-        asyncio.run(main())
+        # Проверяем, есть ли уже запущенный event loop
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         
+        # Если loop уже запущен, запускаем задачу внутри него
+        if loop.is_running():
+            logger.info("🔄 Использую существующий event loop Render")
+            task = loop.create_task(run_bot())
+            
+            # Ждем завершения задачи (блокирующий вызов)
+            try:
+                loop.run_until_complete(task)
+            except KeyboardInterrupt:
+                logger.info("⏹️ Получен сигнал прерывания")
+            except Exception as e:
+                logger.error(f"Ошибка при выполнении задачи: {e}")
+        else:
+            # Если loop не запущен, запускаем стандартно
+            logger.info("🆕 Создаю новый event loop")
+            loop.run_until_complete(run_bot())
+            
     except KeyboardInterrupt:
-        logger.info("⏹️  Бот остановлен вручную")
+        logger.info("⏹️ Бот остановлен пользователем")
     except Exception as e:
         logger.error(f"💥 Фатальная ошибка: {e}")
+        sys.exit(1)
+
+# Точка входа
+if __name__ == '__main__':
+    main()
