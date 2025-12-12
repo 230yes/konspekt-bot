@@ -1,262 +1,80 @@
 #!/usr/bin/env python3
 """
-Konspekt Helper Bot - Telegram бот с настоящим поиском Google
-Бот: @Konspekt_help_bot
-Версия: Python 3.11.8
+Konspekt Helper Bot - Оптимизирован для Render
+Без хардкода токенов в коде
 """
 
+import os
 import logging
 import json
-import os
-import re
-import random
 import requests
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse
 import threading
 import time
 
-# Настройка логирования
+# ==================== НАСТРОЙКА ЛОГИРОВАНИЯ ====================
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# HTML шаблон для веб-сайта
-HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>@Konspekt_help_bot - Панель управления</title>
-    <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 15px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            overflow: hidden;
-        }}
-        header {{
-            background: linear-gradient(to right, #4A00E0, #8E2DE2);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }}
-        h1 {{
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }}
-        .content {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 30px;
-            padding: 30px;
-        }}
-        .card {{
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 25px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }}
-        .card h2 {{
-            color: #4A00E0;
-            margin-bottom: 15px;
-            border-bottom: 2px solid #4A00E0;
-            padding-bottom: 10px;
-        }}
-        .stat-grid {{
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin-top: 15px;
-        }}
-        .stat-item {{
-            background: white;
-            padding: 12px;
-            border-radius: 8px;
-            text-align: center;
-            border-left: 4px solid #4A00E0;
-        }}
-        .stat-value {{
-            font-size: 1.8em;
-            font-weight: bold;
-            color: #4A00E0;
-        }}
-        .btn {{
-            display: inline-block;
-            background: #4A00E0;
-            color: white;
-            padding: 12px 25px;
-            border-radius: 5px;
-            text-decoration: none;
-            margin: 10px 5px;
-            font-weight: bold;
-        }}
-        .api-status {{
-            display: inline-block;
-            padding: 5px 10px;
-            border-radius: 15px;
-            font-size: 0.9em;
-            margin-left: 10px;
-        }}
-        .status-active {{
-            background: #d4edda;
-            color: #155724;
-        }}
-        .status-inactive {{
-            background: #f8d7da;
-            color: #721c24;
-        }}
-        footer {{
-            text-align: center;
-            padding: 20px;
-            background: #f8f9fa;
-            color: #666;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>📚 @Konspekt_help_bot</h1>
-            <p>AI-бот с настоящим поиском Google</p>
-            <p>API статус: <span class="api-status status-active">● Активен</span></p>
-        </header>
-        
-        <div class="content">
-            <div class="card">
-                <h2>📊 Статистика</h2>
-                <div class="stat-grid">
-                    <div class="stat-item">
-                        <div class="stat-value" id="totalUsers">0</div>
-                        <div>Пользователей</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="totalMessages">0</div>
-                        <div>Сообщений</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="conspectsCreated">0</div>
-                        <div>Конспектов</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="googleSearches">0</div>
-                        <div>Поисков Google</div>
-                    </div>
-                </div>
-                <div style="margin-top: 20px;">
-                    <a href="/stats.json" class="btn">Статистика (JSON)</a>
-                    <a href="/health" class="btn">Проверить здоровье</a>
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>🔍 Поиск Google</h2>
-                <p><strong>Бот использует:</strong></p>
-                <ul>
-                    <li>Google Custom Search API</li>
-                    <li>Настоящий поиск в интернете</li>
-                    <li>Актуальные источники</li>
-                    <li>Анализ и структурирование</li>
-                </ul>
-                <p style="margin-top: 15px; font-size: 0.9em;">
-                    Лимит: 100 поисковых запросов в день
-                </p>
-                <div style="margin-top: 20px;">
-                    <a href="https://t.me/Konspekt_help_bot" class="btn" target="_blank">Открыть бота</a>
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>🎯 Как работает</h2>
-                <p>1. Вы отправляете тему</p>
-                <p>2. Бот ищет информацию в Google</p>
-                <p>3. Анализирует найденные источники</p>
-                <p>4. Создает уникальный конспект</p>
-                <p style="margin-top: 15px; font-size: 0.9em; color: #666;">
-                    * В боте есть секретная пасхалка!
-                </p>
-            </div>
-        </div>
-        
-        <footer>
-            <p>© 2024 @Konspekt_help_bot | Google Search API | Render.com</p>
-            <p style="margin-top: 10px; font-size: 0.8em;">
-                Поисковый движок ID: 13aac457275834df9
-            </p>
-        </footer>
-    </div>
-    
-    <script>
-        async function loadStats() {{
-            try {{
-                const response = await fetch('/stats.json');
-                const data = await response.json();
-                document.getElementById('totalUsers').textContent = data.stats.total_users;
-                document.getElementById('totalMessages').textContent = data.stats.total_messages;
-                document.getElementById('conspectsCreated').textContent = data.stats.conspects_created;
-                document.getElementById('googleSearches').textContent = data.stats.google_searches || 0;
-            }} catch (error) {{
-                console.log('Ошибка загрузки статистики');
-            }}
-        }}
-        document.addEventListener('DOMContentLoaded', loadStats);
-    </script>
-</body>
-</html>
-"""
+# ==================== ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (ТОЛЬКО ИЗ RENDER) ====================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "13aac457275834df9")
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "")
+PORT = int(os.getenv("PORT", 10000))
 
-# Глобальные переменные
+# ==================== ПРОВЕРКА КОНФИГУРАЦИИ ====================
+logger.info("=" * 60)
+logger.info("🚀 ЗАПУСК KONSPEKT HELPER BOT")
+logger.info("=" * 60)
+
+# Проверяем обязательные переменные
+missing_vars = []
+if not TELEGRAM_TOKEN:
+    missing_vars.append("TELEGRAM_TOKEN")
+if not GOOGLE_API_KEY:
+    missing_vars.append("GOOGLE_API_KEY")
+
+if missing_vars:
+    logger.error(f"❌ Отсутствуют обязательные переменные окружения: {', '.join(missing_vars)}")
+    logger.error("Добавьте их в Render Dashboard -> Environment")
+    exit(1)
+
+logger.info("✅ Все переменные окружения загружены")
+
+# ==================== СТАТИСТИКА ====================
 stats = {
     "total_users": 0,
     "total_messages": 0,
-    "active_today": 0,
     "conspects_created": 0,
     "google_searches": 0,
-    "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    "user_activity": {},
+    "start_time": datetime.now().isoformat(),
     "user_states": {}
 }
 
-# Конфигурация Google Search API
-GOOGLE_API_KEY = "AIzaSyDvQn8xTzR7FjCGfh8ZhkBNd_f48AyUbA4"
-GOOGLE_CSE_ID = "13aac457275834df9"  # Твой Search Engine ID
-
+# ==================== GOOGLE SEARCH API ====================
 class GoogleSearchAPI:
-    """Класс для работы с Google Custom Search API"""
-    
-    def __init__(self, api_key, cse_id):
-        self.api_key = api_key
-        self.cse_id = cse_id
+    def __init__(self):
+        self.api_key = GOOGLE_API_KEY
+        self.cse_id = GOOGLE_CSE_ID
         self.base_url = "https://www.googleapis.com/customsearch/v1"
-        self.search_cache = {}  # Кэш для повторных запросов
-        logger.info(f"Google Search API инициализирован")
+        self.cache = {}
+        logger.info("✅ Google Search API готов")
     
-    def search(self, query, num_results=7):
-        """Выполняет поиск через Google API"""
+    def search(self, query, num_results=3):
+        """Выполняет поиск через Google Custom Search API"""
+        if not query or len(query.strip()) < 2:
+            return self._create_fallback_result(query, "Пустой запрос")
         
         # Проверяем кэш
         cache_key = f"{query}_{num_results}"
-        if cache_key in self.search_cache:
-            logger.info(f"Использую кэшированные результаты для: {query}")
-            return self.search_cache[cache_key]
+        if cache_key in self.cache:
+            return self.cache[cache_key]
         
         # Обновляем статистику
         stats["google_searches"] += 1
@@ -265,779 +83,668 @@ class GoogleSearchAPI:
             "key": self.api_key,
             "cx": self.cse_id,
             "q": query,
-            "num": num_results,
+            "num": min(num_results, 5),
             "hl": "ru",
-            "lr": "lang_ru",
-            "safe": "active",
-            "cr": "countryRU"
+            "lr": "lang_ru"
         }
         
         try:
-            logger.info(f"Выполняю поиск Google: {query}")
-            response = requests.get(self.base_url, params=params, timeout=15)
+            response = requests.get(self.base_url, params=params, timeout=10)
+            
+            if response.status_code == 403:
+                logger.error("❌ Доступ запрещен. Проверьте API ключ в Google Cloud Console")
+                return self._create_fallback_result(query, "API доступ запрещен")
+            
+            if response.status_code == 429:
+                logger.warning("⚠️ Превышен лимит запросов (100/день)")
+                return self._create_fallback_result(query, "Достигнут дневной лимит")
+            
             response.raise_for_status()
             data = response.json()
             
-            # Анализируем результаты
-            search_results = self._analyze_search_results(data, query)
-            
-            # Сохраняем в кэш
-            self.search_cache[cache_key] = search_results
-            
-            logger.info(f"Поиск успешен: {query} ({len(search_results['items'])} результатов)")
-            return search_results
+            result = self._parse_results(data, query)
+            self.cache[cache_key] = result
+            return result
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Ошибка поиска Google: {e}")
-            return self._generate_fallback_results(query)
+            logger.error(f"❌ Ошибка сети: {e}")
+            return self._create_fallback_result(query, f"Ошибка сети: {str(e)[:50]}")
     
-    def _analyze_search_results(self, data, original_query):
-        """Анализирует и структурирует результаты поиска"""
-        
+    def _parse_results(self, data, query):
+        """Парсит результаты поиска"""
         items = []
         if "items" in data:
-            for item in data["items"]:
+            for item in data["items"][:3]:
                 items.append({
-                    "title": item.get("title", "Без названия"),
-                    "snippet": item.get("snippet", "Без описания"),
-                    "link": item.get("link", ""),
-                    "displayLink": item.get("displayLink", ""),
-                    "formattedUrl": item.get("formattedUrl", "")
+                    "title": item.get("title", ""),
+                    "snippet": item.get("snippet", ""),
+                    "source": item.get("displayLink", "")
                 })
-        
-        # Анализ поисковой информации
-        search_info = data.get("searchInformation", {})
-        total_results = search_info.get("totalResults", "0")
-        search_time = search_info.get("searchTime", 0)
-        
-        # Определяем тип контента на основе результатов
-        content_type = self._detect_content_type(items, original_query)
-        
-        # Извлекаем ключевые термины
-        key_terms = self._extract_key_terms(items, original_query)
-        
-        # Определяем надежность источников
-        source_quality = self._assess_source_quality(items)
         
         return {
             "success": True,
-            "query": original_query,
+            "query": query,
             "items": items,
-            "total_results": total_results,
-            "search_time": search_time,
-            "content_type": content_type,
-            "key_terms": key_terms,
-            "source_quality": source_quality,
+            "total": len(items),
             "timestamp": datetime.now().isoformat()
         }
     
-    def _detect_content_type(self, items, query):
-        """Определяет тип контента на основе результатов"""
-        query_lower = query.lower()
-        
-        # Проверяем по запросу
-        if any(word in query_lower for word in ["инфляция", "экономика", "финансы", "рынок", "бизнес"]):
-            return "экономика"
-        elif any(word in query_lower for word in ["война", "конфликт", "армия", "военный", "сражение"]):
-            return "война"
-        elif any(word in query_lower for word in ["общество", "социум", "культура", "социальный"]):
-            return "общество"
-        elif any(word in query_lower for word in ["технолог", "ии", "искусственный интеллект", "робот", "программир"]):
-            return "технологии"
-        elif any(word in query_lower for word in ["наука", "исследование", "ученый", "физик", "химия"]):
-            return "наука"
-        elif any(word in query_lower for word in ["медицина", "здоровье", "лечение", "врач"]):
-            return "медицина"
-        elif any(word in query_lower for word in ["экология", "природа", "климат", "окружающая среда"]):
-            return "экология"
-        elif any(word in query_lower for word in ["образование", "обучение", "школа", "университет"]):
-            return "образование"
-        
-        # Анализируем результаты, если не определили по запросу
-        if items:
-            snippets = " ".join([item["snippet"].lower() for item in items[:3]])
-            
-            if any(word in snippets for word in ["инфляция", "экономик", "финанс", "рынок", "ввп"]):
-                return "экономика"
-            elif any(word in snippets for word in ["войн", "конфликт", "арми", "военн", "сражен"]):
-                return "война"
-            elif any(word in snippets for word in ["обществ", "социум", "культур", "социальн"]):
-                return "общество"
-        
-        return "общая тема"
-    
-    def _extract_key_terms(self, items, query):
-        """Извлекает ключевые термины из результатов"""
-        all_text = query.lower()
-        
-        for item in items[:5]:  # Анализируем первые 5 результатов
-            all_text += " " + item["title"].lower() + " " + item["snippet"].lower()
-        
-        # Убираем стоп-слова и выделяем ключевые термины
-        stop_words = {"и", "в", "на", "с", "по", "о", "об", "для", "из", "от", "это", "что", "как", "но", "а", "или", "если"}
-        
-        words = re.findall(r'\b[а-яё]{4,}\b', all_text)  # Слова от 4 букв
-        word_freq = {}
-        
-        for word in words:
-            if word not in stop_words:
-                word_freq[word] = word_freq.get(word, 0) + 1
-        
-        # Возвращаем топ-10 самых частых слов
-        sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
-        return [word for word, freq in sorted_words[:10]]
-    
-    def _assess_source_quality(self, items):
-        """Оценивает качество источников"""
-        reliable_domains = [
-            "wikipedia.org", "ria.ru", "tass.ru", "rbc.ru", "kommersant.ru",
-            "vedomosti.ru", "forbes.ru", "bbc.com", "reuters.com", "bloomberg.com",
-            "nature.com", "sciencemag.org", "lenta.ru", "meduza.io", "thebell.io"
-        ]
-        
-        quality_score = 0
-        total_items = len(items)
-        
-        if total_items == 0:
-            return "низкое"
-        
-        for item in items:
-            link = item.get("link", "").lower()
-            for domain in reliable_domains:
-                if domain in link:
-                    quality_score += 1
-                    break
-        
-        reliability_percentage = (quality_score / total_items) * 100
-        
-        if reliability_percentage >= 50:
-            return "высокое"
-        elif reliability_percentage >= 20:
-            return "среднее"
-        else:
-            return "низкое"
-    
-    def _generate_fallback_results(self, query):
-        """Генерирует fallback-результаты при ошибке API"""
-        logger.warning(f"Использую fallback для запроса: {query}")
-        
-        # Простая имитация результатов
-        items = [
-            {
-                "title": f"Основная информация по теме: {query}",
-                "snippet": f"Тема '{query}' является важной и актуальной для изучения. Существуют различные подходы к её исследованию и пониманию.",
-                "link": "",
-                "displayLink": "fallback",
-                "formattedUrl": ""
-            }
-        ]
-        
+    def _create_fallback_result(self, query, reason=""):
+        """Создает fallback-результат при ошибке"""
         return {
             "success": False,
             "query": query,
-            "items": items,
-            "total_results": "0",
-            "search_time": 0,
-            "content_type": "общая тема",
-            "key_terms": query.lower().split(),
-            "source_quality": "низкое",
-            "timestamp": datetime.now().isoformat(),
-            "fallback": True
+            "items": [{
+                "title": f"Информация по запросу: {query}",
+                "snippet": f"Данные будут обновлены позже. {reason}",
+                "source": "локальная база"
+            }],
+            "total": 1,
+            "fallback": True,
+            "timestamp": datetime.now().isoformat()
         }
 
+# ==================== ГЕНЕРАТОР КОНСПЕКТОВ ====================
 class ConspectGenerator:
-    """Генератор конспектов на основе поиска Google"""
-    
     def __init__(self):
-        self.google_searcher = GoogleSearchAPI(GOOGLE_API_KEY, GOOGLE_CSE_ID)
-        logger.info("Генератор конспектов инициализирован")
+        self.searcher = GoogleSearchAPI()
+        logger.info("✅ Генератор конспектов готов")
     
-    @staticmethod
-    def is_easter_egg(text):
-        """Проверка на пасхалку"""
-        text_lower = text.lower()
-        easter_egg_phrases = [
-            "план захвата польши",
-            "захват польши",
-            "план по захвату польши", 
-            "как захватить польшу",
-            "стратегия захвата польши",
-            "вторжение в польшу",
-            "оккупация польши",
-            "завоевание польши",
-            "захват польши план",
-            "польша захват",
-            "захватить польшу",
-            "польша план захвата",
-            "план вторжения в польшу",
-            "военная операция польша",
-            "атака на польшу"
-        ]
-        
-        for phrase in easter_egg_phrases:
-            if phrase in text_lower:
-                return True
-        return False
-    
-    @staticmethod
-    def generate_easter_egg():
-        """Генерация пасхалки"""
-        responses = [
-            "🍵 *Поздравляю вы стали Чаем скоро придет фокся*",
-            "🍵 *Статус: Чай. Фокся в пути.*",
-            "🍵 *Вы - Чай. Фокся близко.*",
-            "🍵 *Чай активирован. Фокся скоро.*"
-        ]
-        return random.choice(responses)
-    
-    def generate_conspect(self, topic, volume):
-        """Генерирует конспект на основе поиска Google"""
+    def generate(self, topic, volume="short"):
+        """Генерирует конспект на основе поиска"""
+        # Проверка пасхалки
+        if self._is_easter_egg(topic):
+            return self._create_easter_egg_response()
         
         # Выполняем поиск
-        search_results = self.google_searcher.search(topic)
+        search_results = self.searcher.search(topic)
         
-        if volume == "краткий":
-            return self._generate_short(topic, search_results)
-        elif volume == "подробный":
-            return self._generate_detailed(topic, search_results)
-        else:  # развернутый
-            return self._generate_extended(topic, search_results)
+        # Генерируем конспект в зависимости от объема
+        if volume == "detailed":
+            return self._create_detailed_conspect(topic, search_results)
+        elif volume == "extended":
+            return self._create_extended_conspect(topic, search_results)
+        else:
+            return self._create_short_conspect(topic, search_results)
     
-    def _generate_short(self, topic, search_data):
-        """Краткий конспект"""
-        
-        items = search_data.get("items", [])
-        content_type = search_data.get("content_type", "общая тема")
-        key_terms = search_data.get("key_terms", [])
-        
+    def _is_easter_egg(self, text):
+        """Проверяет, является ли запрос пасхалкой"""
+        text_lower = text.lower()
+        easter_phrases = [
+            "план захвата польши",
+            "захват польши",
+            "чай и польша"
+        ]
+        return any(phrase in text_lower for phrase in easter_phrases)
+    
+    def _create_easter_egg_response(self):
+        """Создает ответ для пасхалки"""
+        responses = [
+            "🍵 *Секретная пасхалка активирована!*\n\nСтатус: Чайный мастер. Фокся уже в пути!",
+            "🍵 *Поздравляем!* Вы нашли секрет!\n\nЧай заварен, фокся скоро будет здесь!",
+            "🍵 *Wow! Easter egg found!*\n\nTea status: ACTIVE. Foksya incoming!"
+        ]
+        import random
+        return random.choice(responses)
+    
+    def _create_short_conspect(self, topic, results):
+        """Создает краткий конспект"""
         conspect = f"📄 *КОНСПЕКТ: {topic.upper()}*\n\n"
         
-        # Источники поиска
-        conspect += f"🔍 *ПОИСК В GOOGLE:*\n"
-        conspect += f"• Найдено результатов: {search_data.get('total_results', '0')}\n"
-        conspect += f"• Тип контента: {content_type}\n"
-        conspect += f"• Качество источников: {search_data.get('source_quality', 'неизвестно')}\n\n"
+        conspect += f"🔍 *Результаты поиска:* {results['total']} источников\n\n"
         
-        # Основная информация из поиска
-        conspect += f"🎯 *ОСНОВНАЯ ИНФОРМАЦИЯ:*\n"
-        
-        if items:
-            # Берем информацию из первых 3 результатов
-            for i, item in enumerate(items[:3], 1):
-                snippet = item.get("snippet", "")
-                if len(snippet) > 150:
-                    snippet = snippet[:150] + "..."
+        if results["items"]:
+            conspect += "*ОСНОВНЫЕ ТЕЗИСЫ:*\n"
+            for i, item in enumerate(results["items"][:2], 1):
+                snippet = item["snippet"]
+                if len(snippet) > 120:
+                    snippet = snippet[:120] + "..."
                 conspect += f"{i}. {snippet}\n"
         else:
-            conspect += f"По теме '{topic}' найдена информация, требующая системного изучения.\n"
+            conspect += "*ИНФОРМАЦИЯ:*\nТема требует дополнительного изучения.\n"
         
-        conspect += f"\n📌 *КЛЮЧЕВЫЕ ТЕРМИНЫ:*\n"
-        if key_terms:
-            for i, term in enumerate(key_terms[:5], 1):
-                conspect += f"{i}. {term.capitalize()}\n"
-        else:
-            conspect += "• Основные понятия темы\n• Ключевые концепции\n• Важные аспекты\n"
-        
-        conspect += f"\n💡 *ВЫВОДЫ ИЗ АНАЛИЗА:*\n"
-        conspect += f"• Тема представляет значительный интерес\n"
-        conspect += f"• Требует дальнейшего изучения\n"
-        conspect += f"• Имеет практическую значимость\n\n"
-        
-        conspect += f"🌐 *ИСТОЧНИКИ:* Google Search API\n"
-        conspect += f"🕒 *Время анализа:* {search_data.get('search_time', 0):.2f} секунд"
+        conspect += f"\n💡 *ВЫВОД:* Тема актуальна для исследования.\n\n"
+        conspect += f"🤖 *@Konspekt_help_bot* | 🌐 *Google Search API*"
         
         return conspect
     
-    def _generate_detailed(self, topic, search_data):
-        """Подробный конспект"""
+    def _create_detailed_conspect(self, topic, results):
+        """Создает подробный конспект"""
+        conspect = f"📚 *ПОДРОБНЫЙ АНАЛИЗ: {topic.upper()}*\n\n"
         
-        items = search_data.get("items", [])
-        content_type = search_data.get("content_type", "общая тема")
-        key_terms = search_data.get("key_terms", [])
-        
-        conspect = f"📚 *ПОДРОБНЫЙ КОНСПЕКТ: {topic.upper()}*\n\n"
-        
-        # Методология исследования
-        conspect += f"🔬 *МЕТОДОЛОГИЯ ИССЛЕДОВАНИЯ:*\n"
-        conspect += f"• Поисковый запрос: '{topic}'\n"
-        conspect += f"• Анализировано результатов: {len(items)}\n"
-        conspect += f"• Всего найдено: {search_data.get('total_results', '0')} источников\n"
-        conspect += f"• Качество источников: {search_data.get('source_quality', 'неизвестно')}\n"
-        conspect += f"• Тип контента: {content_type}\n\n"
-        
-        # Анализ найденной информации
-        conspect += f"📊 *АНАЛИЗ НАЙДЕННОЙ ИНФОРМАЦИИ:*\n\n"
-        
-        if items:
-            for i, item in enumerate(items[:5], 1):
-                title = item.get("title", "")
-                snippet = item.get("snippet", "")
-                source = item.get("displayLink", "неизвестный источник")
-                
-                if len(snippet) > 200:
-                    snippet = snippet[:200] + "..."
-                
-                conspect += f"{i}. *{title}*\n"
-                conspect += f"   {snippet}\n"
-                conspect += f"   Источник: {source}\n\n"
-        else:
-            conspect += "Информация по данной теме требует более глубокого исследования.\n\n"
-        
-        # Структурирование информации
-        conspect += f"🏗 *СТРУКТУРИРОВАНИЕ ИНФОРМАЦИИ:*\n"
-        
-        sections = [
-            "Теоретические основы и определения",
-            "Ключевые аспекты и характеристики", 
-            "Практическое применение и значение",
-            "Современные тенденции и перспективы",
-            "Рекомендации для дальнейшего изучения"
-        ]
-        
-        for i, section in enumerate(sections, 1):
-            conspect += f"{i}. {section}\n"
-        
-        conspect += f"\n🔑 *ТЕРМИНОЛОГИЧЕСКИЙ АППАРАТ:*\n"
-        if key_terms:
-            for i, term in enumerate(key_terms[:8], 1):
-                conspect += f"{i}. {term.capitalize()} — ключевое понятие в контексте темы\n"
-        else:
-            conspect += "• Основные термины и определения\n• Специализированная лексика\n• Концептуальный аппарат\n"
-        
-        # Выводы
-        conspect += f"\n💎 *ВЫВОДЫ И ЗАКЛЮЧЕНИЕ:*\n"
-        conspect += f"Анализ поисковых результатов по теме '{topic}' позволяет сделать следующие выводы:\n\n"
-        conspect += f"1. Тема является *{random.choice(['актуальной', 'значимой', 'важной'])}* для изучения\n"
-        conspect += f"2. Существуют различные подходы к её исследованию\n"
-        conspect += f"3. Информация требует критического осмысления\n"
-        conspect += f"4. Необходимо учитывать контекст и источники\n\n"
-        
-        conspect += f"🌐 *ИСТОЧНИКИ ДАННЫХ:* Google Custom Search API\n"
-        conspect += f"🔍 *Поисковый движок ID:* {GOOGLE_CSE_ID}\n"
-        conspect += f"⏱ *Время анализа:* {search_data.get('search_time', 0):.2f} секунд"
-        
-        return conspect
-    
-    def _generate_extended(self, topic, search_data):
-        """Развернутый конспект"""
-        
-        items = search_data.get("items", [])
-        content_type = search_data.get("content_type", "общая тема")
-        key_terms = search_data.get("key_terms", [])
-        
-        conspect = f"📖 *ПОЛНОЕ ИССЛЕДОВАНИЕ: {topic.upper()}*\n\n"
-        
-        # Введение с анализом поиска
-        conspect += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        conspect += f"ЧАСТЬ 1: МЕТОДОЛОГИЯ И ИСТОЧНИКИ\n"
-        conspect += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        conspect += f"🔍 *ПАРАМЕТРЫ ПОИСКОВОГО ИССЛЕДОВАНИЯ:*\n"
-        conspect += f"• Поисковый запрос: '{topic}'\n"
-        conspect += f"• Всего найдено источников: {search_data.get('total_results', '0')}\n"
-        conspect += f"• Проанализировано результатов: {len(items)}\n"
-        conspect += f"• Качество источников: {search_data.get('source_quality', 'неизвестно')}\n"
-        conspect += f"• Тип контента: {content_type}\n"
-        conspect += f"• Время выполнения поиска: {search_data.get('search_time', 0):.2f} сек\n\n"
-        
-        conspect += f"📚 *АНАЛИЗ КЛЮЧЕВЫХ ИСТОЧНИКОВ:*\n\n"
-        
-        if items:
-            for i, item in enumerate(items[:7], 1):
-                title = item.get("title", "")
-                snippet = item.get("snippet", "")
-                source = item.get("displayLink", "неизвестно")
-                link = item.get("formattedUrl", "")
-                
+        conspect += "*ИСТОЧНИКИ ИНФОРМАЦИИ:*\n"
+        if results["items"]:
+            for i, item in enumerate(results["items"], 1):
+                conspect += f"{i}. *{item['title']}*\n"
+                snippet = item["snippet"]
                 if len(snippet) > 150:
                     snippet = snippet[:150] + "..."
-                
-                conspect += f"*Источник {i}: {title}*\n"
-                conspect += f"   📝 {snippet}\n"
-                conspect += f"   🌐 {source}"
-                if link:
-                    conspect += f" ({link})"
-                conspect += f"\n\n"
-        else:
-            conspect += "Для данной темы требуется более специализированное исследование.\n\n"
+                conspect += f"   {snippet}\n"
+                if item["source"]:
+                    conspect += f"   📍 {item['source']}\n"
+                conspect += "\n"
         
-        # Аналитическая часть
-        conspect += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        conspect += f"ЧАСТЬ 2: АНАЛИТИЧЕСКИЙ ОБЗОР\n"
-        conspect += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        conspect += f"🎯 *ВЫЯВЛЕННЫЕ ТЕНДЕНЦИИ И ЗАКОНОМЕРНОСТИ:*\n\n"
-        
-        trends = [
-            "Преобладание определённых подходов к изучению темы",
-            "Наличие различных интерпретаций и точек зрения",
-            "Взаимосвязь с другими областями знания",
-            "Эволюция представлений о теме со временем",
-            "Практическая значимость и применение"
+        conspect += "*СТРУКТУРА ИССЛЕДОВАНИЯ:*\n"
+        sections = [
+            "Теоретические основы",
+            "Практическое применение",
+            "Актуальные тенденции",
+            "Перспективы развития"
         ]
+        for section in sections:
+            conspect += f"• {section}\n"
         
-        for i, trend in enumerate(trends, 1):
-            conspect += f"{i}. {trend}\n"
+        conspect += f"\n📊 *Всего проанализировано:* {results['total']} источников\n"
+        conspect += f"🤖 *Автоматически сгенерировано @Konspekt_help_bot*"
         
-        conspect += f"\n🔑 *КЛЮЧЕВЫЕ КОНЦЕПЦИИ И ТЕРМИНЫ:*\n\n"
+        return conspect
+    
+    def _create_extended_conspect(self, topic, results):
+        """Создает развернутый конспект"""
+        conspect = f"📖 *ПОЛНОЕ ИССЛЕДОВАНИЕ: {topic.upper()}*\n\n"
         
-        if key_terms:
-            # Группируем термины по темам
-            term_groups = {}
-            for term in key_terms[:15]:
-                # Простая категоризация
-                if any(key in term for key in ["теор", "конц", "принц"]):
-                    category = "Теоретические концепции"
-                elif any(key in term for key in ["практ", "примен", "метод"]):
-                    category = "Практические аспекты"
-                elif any(key in term for key in ["истор", "эвол", "развит"]):
-                    category = "Историческое развитие"
-                else:
-                    category = "Основные понятия"
-                
-                if category not in term_groups:
-                    term_groups[category] = []
-                term_groups[category].append(term.capitalize())
-            
-            for category, terms in term_groups.items():
-                conspect += f"*{category}:*\n"
-                for term in terms[:5]:
-                    conspect += f"• {term}\n"
-                conspect += f"\n"
-        else:
-            conspect += "• Фундаментальные понятия и определения\n"
-            conspect += "• Специализированная терминология\n"
-            conspect += "• Ключевые концепции и подходы\n\n"
+        conspect += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        conspect += "ЧАСТЬ 1: МЕТОДОЛОГИЯ ИССЛЕДОВАНИЯ\n"
+        conspect += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         
-        # Структурный анализ
-        conspect += f"🏗 *СТРУКТУРНЫЙ АНАЛИЗ ТЕМЫ:*\n\n"
+        conspect += f"*ИССЛЕДОВАТЕЛЬСКИЙ ЗАПРОС:*\n{topic}\n\n"
+        conspect += f"*ОБЪЕМ ДАННЫХ:* {results['total']} источников\n"
+        conspect += f"*ВРЕМЯ АНАЛИЗА:* {datetime.now().strftime('%H:%M')}\n\n"
         
-        analysis_points = [
-            ("Уровень сложности", random.choice(["Базовый", "Средний", "Сложный"])),
-            ("Междисциплинарность", random.choice(["Высокая", "Средняя", "Низкая"])),
-            ("Практическая ориентированность", random.choice(["Высокая", "Умеренная", "Теоретическая"])),
-            ("Актуальность", random.choice(["Высокая", "Средняя", "Нишевая"])),
-            ("Объем доступной информации", random.choice(["Обширный", "Умеренный", "Ограниченный"]))
-        ]
+        conspect += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        conspect += "ЧАСТЬ 2: АНАЛИТИЧЕСКИЕ ВЫВОДЫ\n"
+        conspect += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         
-        for point, value in analysis_points:
-            conspect += f"• {point}: {value}\n"
-        
-        # Рекомендации
-        conspect += f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        conspect += f"ЧАСТЬ 3: РЕКОМЕНДАЦИИ И ВЫВОДЫ\n"
-        conspect += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        conspect += f"💡 *МЕТОДИЧЕСКИЕ РЕКОМЕНДАЦИИ ДЛЯ ИЗУЧЕНИЯ:*\n\n"
-        
-        recommendations = [
-            "Начните с изучения базовых понятий и определений",
-            "Проанализируйте различные точки зрения на тему",
-            "Изучите исторический контекст развития темы",
-            "Рассмотрите практические применения и кейсы",
-            "Обратите внимание на современные тенденции",
-            "Используйте междисциплинарный подход",
-            "Критически оценивайте источники информации"
-        ]
-        
-        for i, recommendation in enumerate(recommendations, 1):
-            conspect += f"{i}. {recommendation}\n"
-        
-        conspect += f"\n🎯 *ПЕРСПЕКТИВНЫЕ НАПРАВЛЕНИЯ ДЛЯ ДАЛЬНЕЙШЕГО ИССЛЕДОВАНИЯ:*\n\n"
-        
+        conspect += "*КЛЮЧЕВЫЕ НАПРАВЛЕНИЯ ДЛЯ ИЗУЧЕНИЯ:*\n"
         directions = [
-            "Углубленное изучение специфических аспектов темы",
-            "Сравнительный анализ различных подходов",
-            "Исследование прикладного значения в современных условиях",
-            "Анализ влияния на смежные области знания",
-            "Разработка новых методик изучения и применения"
+            "Изучение базовых понятий и определений",
+            "Анализ различных методологических подходов",
+            "Исследование исторического контекста",
+            "Рассмотрение практических кейсов применения",
+            "Оценка современных тенденций и перспектив"
         ]
+        for i, direction in enumerate(directions, 1):
+            conspect += f"{i}. {direction}\n"
         
-        for direction in directions:
-            conspect += f"• {direction}\n"
-        
-        # Заключение
         conspect += f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        conspect += f"💎 ИТОГОВЫЕ ВЫВОДЫ\n"
-        conspect += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        conspect += f"На основе анализа поисковых результатов и источников по теме '{topic}' можно сделать следующие выводы:\n\n"
-        
-        conclusions = [
-            "Тема представляет значительный интерес для исследования",
-            "Существует разнообразие подходов и интерпретаций",
-            "Информация требует систематизации и критического анализа",
-            "Имеются перспективы для дальнейшего углубленного изучения",
-            "Полученные знания могут найти практическое применение"
-        ]
-        
-        for i, conclusion in enumerate(conclusions, 1):
-            conspect += f"{i}. {conclusion}\n"
-        
-        conspect += f"\n🔬 *ИССЛЕДОВАНИЕ ВЫПОЛНЕНО С ИСПОЛЬЗОВАНИЕМ:*\n"
+        conspect += f"*ИССЛЕДОВАНИЕ ВЫПОЛНЕНО С ИСПОЛЬЗОВАНИЕМ:*\n"
         conspect += f"• Google Custom Search API\n"
-        conspect += f"• Search Engine ID: {GOOGLE_CSE_ID}\n"
-        conspect += f"• API ключ: {GOOGLE_API_KEY[:15]}...\n"
-        conspect += f"• Алгоритмы анализа и структурирования\n\n"
-        
-        conspect += f"🤖 *АВТОМАТИЧЕСКИ СГЕНЕРИРОВАНО @Konspekt_help_bot*\n"
-        conspect += f"🕒 *Общее время обработки:* {random.uniform(2, 5):.1f} секунд"
+        conspect += f"• Платформа Render.com\n"
+        conspect += f"• 🤖 @Konspekt_help_bot\n"
+        conspect += f"• ⏱ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         
         return conspect
 
-class SimpleBot:
-    """Основной класс Telegram-бота"""
-    
-    def __init__(self, token):
-        self.token = token
-        self.bot_url = f"https://api.telegram.org/bot{token}"
+# ==================== TELEGRAM BOT ====================
+class TelegramBot:
+    def __init__(self):
+        if not TELEGRAM_TOKEN:
+            raise ValueError("TELEGRAM_TOKEN не найден в переменных окружения")
+        
+        self.token = TELEGRAM_TOKEN
+        self.bot_url = f"https://api.telegram.org/bot{self.token}"
         self.generator = ConspectGenerator()
-        logger.info(f"Бот @Konspekt_help_bot с Google Search инициализирован")
-    
-    def start(self, update_id, chat_id):
-        """Обработка команды /start"""
-        welcome_text = (
-            "👋 *Добро пожаловать в Konspekt Helper Bot!*\n\n"
-            
-            "🤖 *Я — бот с настоящим поиском Google!*\n\n"
-            
-            "🔍 *Как это работает:*\n"
-            "1. Вы отправляете тему (например: 'инфляция')\n"
-            "2. Я ищу информацию в Google\n"
-            "3. Анализирую найденные источники\n"
-            "4. Создаю уникальный конспект\n\n"
-            
-            "📊 *Доступные объемы:*\n"
-            "• *1* — Краткий (основные тезисы)\n"
-            "• *2* — Подробный (с анализом источников)\n"
-            "• *3* — Развернутый (полное исследование)\n\n"
-            
-            "⚡ *Использую Google Custom Search API*\n"
-            "🌐 *Ищу в реальном интернете!*\n\n"
-            "🎉 *Попробуйте найти секретную пасхалку!*\n\n"
-            "🚀 *Начните прямо сейчас — отправьте мне тему!*"
-        )
         
-        self._update_stats(chat_id)
-        return self._send_message(chat_id, welcome_text)
-    
-    def process_text(self, update_id, chat_id, text):
-        """Обработка текста от пользователя"""
-        # Проверка на пасхалку
-        if self.generator.is_easter_egg(text):
-            response = self.generator.generate_easter_egg()
-            self._update_stats(chat_id)
-            return self._send_message(chat_id, response)
+        # Настраиваем вебхук
+        if RENDER_EXTERNAL_URL:
+            self._setup_webhook()
         
-        if not text or len(text.strip()) < 2:
-            return self._send_message(
-                chat_id,
-                "📝 *Пожалуйста, укажите тему для поиска*\n\n"
-                "Примеры:\n"
-                "• 'Инфляция в экономике'\n"
-                "• 'Искусственный интеллект'\n"
-                "• 'Изменение климата'\n\n"
-                "Я поищу информацию в Google и создам конспект!"
+        logger.info("✅ Telegram бот инициализирован")
+    
+    def _setup_webhook(self):
+        """Настраивает вебхук Telegram на Render URL"""
+        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
+        try:
+            response = requests.post(
+                f"{self.bot_url}/setWebhook",
+                json={"url": webhook_url},
+                timeout=10
             )
+            if response.json().get("ok"):
+                logger.info(f"✅ Вебхук установлен: {webhook_url}")
+            else:
+                logger.warning(f"⚠️ Не удалось установить вебхук")
+        except Exception as e:
+            logger.error(f"❌ Ошибка настройки вебхука: {e}")
+    
+    def process_message(self, chat_id, text):
+        """Обрабатывает входящее сообщение"""
+        text = text.strip()
         
-        # Сохраняем тему
-        user_state = stats["user_states"].get(str(chat_id), {})
-        user_state["pending_topic"] = text
-        stats["user_states"][str(chat_id)] = user_state
+        # Обновляем статистику
+        self._update_stats(chat_id)
+        
+        # Обработка команд
+        if text.startswith("/"):
+            if text == "/start":
+                return self._send_welcome(chat_id)
+            elif text == "/help":
+                return self._send_help(chat_id)
+            elif text == "/stats":
+                return self._send_stats(chat_id)
+            else:
+                return self._send_message(chat_id, "❓ Неизвестная команда. Используйте /help")
+        
+        # Обработка выбора объема (1, 2, 3)
+        if text in ["1", "2", "3"]:
+            return self._handle_volume_selection(chat_id, text)
+        
+        # Обработка новой темы
+        return self._handle_new_topic(chat_id, text)
+    
+    def _send_welcome(self, chat_id):
+        """Отправляет приветственное сообщение"""
+        welcome = (
+            "👋 *Добро пожаловать в Konspekt Helper Bot!*\n\n"
+            "🤖 *Я — интеллектуальный помощник для создания конспектов!*\n\n"
+            "🚀 *Как это работает:*\n"
+            "1. Отправьте тему для изучения\n"
+            "2. Выберите объем (1-3)\n"
+            "3. Получите готовый конспект\n\n"
+            "📊 *Доступные форматы:*\n"
+            "• *1* — Краткий (основные идеи)\n"
+            "• *2* — Подробный (с анализом)\n"
+            "• *3* — Развернутый (полное исследование)\n\n"
+            "🔍 *Использую Google Search API*\n"
+            "🌐 *Работаю на Render.com*\n\n"
+            "🎯 *Отправьте тему для начала!*"
+        )
+        return self._send_message(chat_id, welcome)
+    
+    def _send_help(self, chat_id):
+        """Отправляет справку"""
+        help_text = (
+            "📚 *СПРАВКА ПО ИСПОЛЬЗОВАНИЮ БОТА*\n\n"
+            "*Основные команды:*\n"
+            "/start - Начало работы\n"
+            "/help - Эта справка\n"
+            "/stats - Статистика бота\n\n"
+            "*Процесс создания конспекта:*\n"
+            "1. Отправьте тему (например: 'Искусственный интеллект')\n"
+            "2. Выберите цифру 1, 2 или 3\n"
+            "3. Получите готовый конспект\n\n"
+            "*Технологии:*\n"
+            "• Google Custom Search API\n"
+            "• Python + Render.com\n"
+            "• Telegram Bot API"
+        )
+        return self._send_message(chat_id, help_text)
+    
+    def _send_stats(self, chat_id):
+        """Отправляет статистику"""
+        stat_text = (
+            f"📊 *СТАТИСТИКА БОТА*\n\n"
+            f"👥 Пользователей: {stats['total_users']}\n"
+            f"💬 Сообщений: {stats['total_messages']}\n"
+            f"📄 Конспектов: {stats['conspects_created']}\n"
+            f"🔍 Поисков Google: {stats['google_searches']}\n"
+            f"⏱ Запущен: {stats['start_time'][:10]}\n\n"
+            f"🌐 Хостинг: Render.com\n"
+            f"🔗 URL: {RENDER_EXTERNAL_URL or 'не настроен'}"
+        )
+        return self._send_message(chat_id, stat_text)
+    
+    def _handle_new_topic(self, chat_id, topic):
+        """Обрабатывает новую тему"""
+        # Сохраняем тему в состоянии пользователя
+        user_id = str(chat_id)
+        if user_id not in stats["user_states"]:
+            stats["user_states"][user_id] = {}
+        
+        stats["user_states"][user_id]["pending_topic"] = topic
         
         # Предлагаем выбрать объем
-        volume_options = (
-            f"🎯 *Тема для поиска: {text}*\n\n"
-            f"🔍 *Я начну поиск в Google и создам конспект.*\n\n"
-            f"📊 *Выберите объем конспекта:*\n\n"
-            
-            f"1️⃣ *КРАТКИЙ (0.5-1 страница):*\n"
-            f"• Основные тезисы из поиска\n"
-            f"• Ключевые термины\n"
-            f"• Быстрые выводы\n\n"
-            
-            f"2️⃣ *ПОДРОБНЫЙ (1-2 страницы):*\n"
-            f"• Анализ найденных источников\n"
-            f"• Структурирование информации\n"
-            f"• Рекомендации по изучению\n\n"
-            
-            f"3️⃣ *РАЗВЕРНУТЫЙ (3-4 страницы):*\n"
-            f"• Полное исследование темы\n"
-            f"• Детальный анализ источников\n"
-            f"• Методические рекомендации\n"
-            f"• Перспективы изучения\n\n"
-            
-            f"🔢 *Отправьте цифру:* 1, 2 или 3"
+        response = (
+            f"🎯 *ТЕМА ПРИНЯТА: {topic}*\n\n"
+            f"✅ Готовлю поиск в Google...\n\n"
+            f"📊 *ВЫБЕРИТЕ ОБЪЕМ КОНСПЕКТА:*\n\n"
+            f"1️⃣ *КРАТКИЙ*\nОсновные тезисы и выводы\n\n"
+            f"2️⃣ *ПОДРОБНЫЙ*\nС анализом источников\n\n"
+            f"3️⃣ *РАЗВЕРНУТЫЙ*\nПолное исследование\n\n"
+            f"🔢 *Отправьте цифру 1, 2 или 3*"
         )
-        
-        self._update_stats(chat_id)
-        return self._send_message(chat_id, volume_options)
+        return self._send_message(chat_id, response)
     
-    def process_volume_choice(self, update_id, chat_id, choice):
-        """Обработка выбора объема"""
-        user_state = stats["user_states"].get(str(chat_id), {})
+    def _handle_volume_selection(self, chat_id, volume_choice):
+        """Обрабатывает выбор объема"""
+        user_id = str(chat_id)
+        user_state = stats["user_states"].get(user_id, {})
         topic = user_state.get("pending_topic", "")
         
         if not topic:
-            return self._send_message(
-                chat_id,
-                "🤔 *Сначала отправьте тему для поиска*\n\n"
-                "Пожалуйста, отправьте тему, а затем выберите объем."
-            )
+            return self._send_message(chat_id, "❌ Сначала отправьте тему для поиска")
         
-        volume_map = {
-            "1": "краткий",
-            "2": "подробный", 
-            "3": "развернутый"
-        }
+        volume_map = {"1": "short", "2": "detailed", "3": "extended"}
+        volume = volume_map.get(volume_choice, "short")
         
-        volume = volume_map.get(choice)
-        if not volume:
-            return self._send_message(
-                chat_id,
-                "❌ *Некорректный выбор*\n\n"
-                "Пожалуйста, выберите:\n"
-                "1 — Краткий конспект\n"
-                "2 — Подробный конспект\n"
-                "3 — Развернутый конспект"
-            )
-        
-        # Сообщение о начале поиска
-        search_msg = (
-            f"🔍 *НАЧИНАЮ ПОИСК В GOOGLE...*\n\n"
-            f"📌 *Тема:* {topic}\n"
-            f"📊 *Объем:* {volume.capitalize()}\n\n"
-            f"⏳ *Ищу информацию...*\n"
-            f"Это займет несколько секунд."
+        # Уведомляем о начале обработки
+        self._send_message(
+            chat_id, 
+            f"🔍 *ИЩУ ИНФОРМАЦИЮ В GOOGLE...*\n\nТема: {topic}\nОбъем: {volume_choice}"
         )
-        self._send_message(chat_id, search_msg)
         
-        # Создаем конспект
         try:
-            conspect = self.generator.generate_conspect(topic, volume)
-            
-            # Обновляем статистику
+            # Генерируем конспект
+            conspect = self.generator.generate(topic, volume)
             stats["conspects_created"] += 1
-            self._update_stats(chat_id)
             
-            # Отправляем конспект
-            response = (
-                f"✅ *КОНСПЕКТ НА ОСНОВЕ ПОИСКА GOOGLE!*\n\n"
-                f"📌 *Тема поиска:* {topic}\n"
-                f"📊 *Объем конспекта:* {volume.capitalize()}\n"
-                f"🔍 *Поисков Google выполнено:* {stats['google_searches']}\n\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            # Отправляем результат
+            result = (
+                f"✅ *КОНСПЕКТ ГОТОВ!*\n\n"
+                f"📌 Тема: {topic}\n"
+                f"📊 Объем: {volume_choice}/3\n"
+                f"🔍 Использовано поисков: {stats['google_searches']}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"{conspect}\n\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"💾 *Сохраните этот конспект*\n\n"
-                f"🔄 *Другой объем по этой теме?* Отправьте 1, 2 или 3\n\n"
-                f"🎯 *Новый поиск?* Просто отправьте тему!"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🔄 *Другой объем?* Отправьте 1, 2 или 3\n"
+                f"🎯 *Новая тема?* Просто напишите её!"
             )
             
-            return self._send_message(chat_id, response)
+            return self._send_message(chat_id, result)
             
         except Exception as e:
-            logger.error(f"Ошибка генерации конспекта: {e}")
+            logger.error(f"❌ Ошибка генерации конспекта: {e}")
             return self._send_message(
                 chat_id,
                 f"❌ *Ошибка при создании конспекта*\n\n"
-                f"Пожалуйста, попробуйте другую тему или повторите позже.\n\n"
+                f"Попробуйте другую тему или повторите позже.\n\n"
                 f"Ошибка: {str(e)[:100]}"
             )
     
     def _update_stats(self, chat_id):
-        """Обновление статистики"""
-        user_key = str(chat_id)
-        today = datetime.now().strftime("%Y-%m-%d")
+        """Обновляет статистику"""
+        user_id = str(chat_id)
         
-        if user_key not in stats["user_activity"]:
+        if user_id not in stats["user_states"]:
             stats["total_users"] += 1
-            stats["user_activity"][user_key] = {
-                "first_seen": datetime.now(),
-                "last_seen": datetime.now(),
+            stats["user_states"][user_id] = {
+                "first_seen": datetime.now().isoformat(),
                 "message_count": 0
             }
         
-        stats["user_activity"][user_key]["last_seen"] = datetime.now()
-        stats["user_activity"][user_key]["message_count"] += 1
-        
-        if stats["user_activity"][user_key].get("last_active_date") != today:
-            stats["active_today"] += 1
-            stats["user_activity"][user_key]["last_active_date"] = today
-        
+        stats["user_states"][user_id]["last_seen"] = datetime.now().isoformat()
+        stats["user_states"][user_id]["message_count"] += 1
         stats["total_messages"] += 1
     
     def _send_message(self, chat_id, text):
-        """Отправка сообщения через Telegram Bot API"""
-        import requests
+        """Отправляет сообщение в Telegram"""
+        try:
+            response = requests.post(
+                f"{self.bot_url}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                    "disable_web_page_preview": True
+                },
+                timeout=10
+            )
+            return response.json().get("ok", False)
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки сообщения: {e}")
+            return False
+
+# ==================== HTTP СЕРВЕР ДЛЯ RENDER ====================
+class BotHTTPServer(BaseHTTPRequestHandler):
+    """HTTP сервер для обработки вебхуков и отдачи статики"""
+    
+    def do_GET(self):
+        """Обрабатывает GET запросы"""
+        path = self.path.split('?')[0]
         
-        url = f"{self.bot_url}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-            "disable_web_page_preview": True
+        if path == "/":
+            self._send_html(INDEX_HTML)
+        elif path == "/health":
+            self._send_json({"status": "ok", "time": datetime.now().isoformat()})
+        elif path == "/stats":
+            self._send_json(stats)
+        elif path == "/webhook":
+            # Для проверки вебхука
+            self._send_json({"webhook": "active", "url": f"{RENDER_EXTERNAL_URL}/webhook"})
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_POST(self):
+        """Обрабатывает POST запросы (Telegram вебхук)"""
+        if self.path == "/webhook":
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length:
+                try:
+                    data = self.rfile.read(content_length)
+                    update = json.loads(data.decode('utf-8'))
+                    
+                    # Обрабатываем в отдельном потоке
+                    threading.Thread(
+                        target=self._handle_telegram_update,
+                        args=(update,),
+                        daemon=True
+                    ).start()
+                    
+                except Exception as e:
+                    logger.error(f"❌ Ошибка обработки вебхука: {e}")
+            
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def _handle_telegram_update(self, update):
+        """Обрабатывает обновление от Telegram"""
+        try:
+            if "message" in update and "text" in update["message"]:
+                chat_id = update["message"]["chat"]["id"]
+                text = update["message"]["text"]
+                
+                bot = TelegramBot()
+                bot.process_message(chat_id, text)
+        except Exception as e:
+            logger.error(f"❌ Ошибка обработки сообщения: {e}")
+    
+    def _send_html(self, content):
+        """Отправляет HTML ответ"""
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(content.encode('utf-8'))
+    
+    def _send_json(self, data):
+        """Отправляет JSON ответ"""
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+    
+    def log_message(self, format, *args):
+        """Отключает логирование запросов"""
+        pass
+
+# HTML для статусной страницы
+INDEX_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 Konspekt Helper Bot</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            background: #10b981;
+            border-radius: 50%;
+            margin-right: 10px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 30px 0;
+        }
+        .stat-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .btn {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="status">
+            <div class="status-dot"></div>
+            <h1>🤖 Konspekt Helper Bot</h1>
+        </div>
+        
+        <p>Telegram бот для создания интеллектуальных конспектов с использованием Google Search API</p>
+        
+        <div class="stats-grid" id="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="users">0</div>
+                <div>Пользователей</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="messages">0</div>
+                <div>Сообщений</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="conspects">0</div>
+                <div>Конспектов</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="searches">0</div>
+                <div>Поисков</div>
+            </div>
+        </div>
+        
+        <h2>🔗 Ссылки</h2>
+        <div>
+            <a href="https://t.me/Konspekt_help_bot" class="btn" target="_blank">🤖 Открыть бота</a>
+            <a href="/stats" class="btn">📊 Статистика</a>
+            <a href="/health" class="btn">❤️ Health Check</a>
+        </div>
+        
+        <h2>🚀 Технологии</h2>
+        <ul>
+            <li><strong>Google Custom Search API</strong> - настоящий поиск в интернете</li>
+            <li><strong>Telegram Bot API</strong> - общение с пользователями</li>
+            <li><strong>Python 3.11</strong> - бэкенд логика</li>
+            <li><strong>Render.com</strong> - облачный хостинг</li>
+        </ul>
+        
+        <h2>📚 Как использовать</h2>
+        <ol>
+            <li>Откройте <a href="https://t.me/Konspekt_help_bot" target="_blank">@Konspekt_help_bot</a></li>
+            <li>Отправьте любую тему для изучения</li>
+            <li>Выберите объем конспекта (1, 2 или 3)</li>
+            <li>Получите готовый конспект на основе поиска Google</li>
+        </ol>
+        
+        <p style="margin-top: 30px; color: #666; font-size: 14px;">
+            Система автоматически обновляется. Текущее время: <span id="time"></span>
+        </p>
+    </div>
+    
+    <script>
+        async function updateStats() {
+            try {
+                const res = await fetch('/stats');
+                const data = await res.json();
+                
+                document.getElementById('users').textContent = data.total_users || 0;
+                document.getElementById('messages').textContent = data.total_messages || 0;
+                document.getElementById('conspects').textContent = data.conspects_created || 0;
+                document.getElementById('searches').textContent = data.google_searches || 0;
+                
+                const timeElement = document.getElementById('time');
+                if (timeElement) {
+                    timeElement.textContent = new Date().toLocaleTimeString();
+                }
+            } catch (error) {
+                console.log('Ошибка загрузки статистики:', error);
+            }
         }
         
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            response.raise_for_status()
-            logger.info(f"Сообщение отправлено в чат {chat_id}")
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ошибка отправки сообщения: {e}")
-            return None
+        // Первоначальная загрузка
+        updateStats();
+        
+        // Обновление каждые 5 секунд
+        setInterval(updateStats, 5000);
+    </script>
+</body>
+</html>
+"""
 
-# [Остальная часть кода с BotServer и функциями запуска остается прежней]
-# Чтобы не превышать лимит символов, я опускаю повторяющиеся части
-# Но они должны быть такими же как в предыдущих ответах
-
-# Класс BotServer и функции запуска оставь без изменений из предыдущего кода
-
-if __name__ == "__main__":
+# ==================== ЗАПУСК ПРИЛОЖЕНИЯ ====================
+def main():
+    """Главная функция запуска"""
+    logger.info(f"🌐 Внешний URL: {RENDER_EXTERNAL_URL or 'Не настроен'}")
+    logger.info(f"🚪 Порт: {PORT}")
+    logger.info(f"🔑 Telegram Token: {'Установлен' if TELEGRAM_TOKEN else 'НЕТ!'}")
+    logger.info(f"🔑 Google API Key: {'Установлен' if GOOGLE_API_KEY else 'НЕТ!'}")
+    logger.info(f"🆔 Google CSE ID: {GOOGLE_CSE_ID}")
     logger.info("=" * 60)
-    logger.info("Запуск @Konspekt_help_bot с настоящим поиском Google")
-    logger.info(f"API ключ: {GOOGLE_API_KEY[:10]}...")
-    logger.info(f"Search Engine ID: {GOOGLE_CSE_ID}")
-    logger.info("=" * 60)
-    
-    # Проверяем доступность Google API
-    test_searcher = GoogleSearchAPI(GOOGLE_API_KEY, GOOGLE_CSE_ID)
-    test_result = test_searcher.search("test", num_results=1)
-    
-    if test_result.get("success"):
-        logger.info("✅ Google Search API доступен")
-    else:
-        logger.warning("⚠️ Google Search API может быть недоступен")
-        logger.info("Бот будет использовать fallback-режим")
-    
-    # Инициализация
-    if "user_states" not in stats:
-        stats["user_states"] = {}
-    if "google_searches" not in stats:
-        stats["google_searches"] = 0
-    
-    token = os.getenv("TELEGRAM_TOKEN")
-    if token:
-        logger.info("TELEGRAM_TOKEN найден")
-    else:
-        logger.warning("TELEGRAM_TOKEN не найден!")
-    
-    # Запускаем бота
-    bot_thread = threading.Thread(target=start_bot, daemon=True)
-    bot_thread.start()
     
     # Запускаем HTTP сервер
-    port = int(os.getenv("PORT", 10000))
-    server_address = ('', port)
+    server = HTTPServer(('', PORT), BotHTTPServer)
     
-    httpd = HTTPServer(server_address, BotServer)  # Нужно определить BotServer
-    logger.info(f"HTTP сервер запущен на порту {port}")
-    logger.info(f"Веб-сайт: http://localhost:{port}")
+    logger.info(f"✅ HTTP сервер запущен на порту {PORT}")
+    logger.info(f"✅ Статусная страница: http://localhost:{PORT}")
+    
+    if RENDER_EXTERNAL_URL:
+        logger.info(f"✅ Вебхук Telegram: {RENDER_EXTERNAL_URL}/webhook")
+    
+    logger.info("✅ Бот готов к работе!")
     
     try:
-        httpd.serve_forever()
+        server.serve_forever()
     except KeyboardInterrupt:
-        logger.info("Сервер остановлен")
+        logger.info("⏹️ Сервер остановлен")
     except Exception as e:
-        logger.error(f"Ошибка сервера: {e}")
+        logger.error(f"❌ Ошибка сервера: {e}")
+
+if __name__ == "__main__":
+    main()
