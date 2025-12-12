@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Konspekt Helper Bot - Telegram бот для создания конспектов с веб-интерфейсом
+Konspekt Helper Bot - Telegram бот для создания конспектов
+Бот: @Konspekt_help_bot
 Разработан для развертывания на Render.com
-Архитектура: единый файл с вебхуками вместо polling
 """
 
 import logging
@@ -22,14 +22,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# HTML шаблон для веб-сайта (ДОЛЖЕН БЫТЬ В НАЧАЛЕ!)
+# HTML шаблон для веб-сайта
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Konspekt Helper Bot - Панель управления</title>
+    <title>@Konspekt_help_bot - Панель управления</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -197,8 +197,8 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <header>
-            <h1>📚 Konspekt Helper Bot</h1>
-            <p class="subtitle">Панель управления Telegram-ботом для создания конспектов</p>
+            <h1>📚 @Konspekt_help_bot</h1>
+            <p class="subtitle">Telegram-бот для создания конспектов | Панель управления</p>
             <p>Статус: <span class="status-badge status-active">● Активен</span></p>
         </header>
         
@@ -241,7 +241,7 @@ HTML_TEMPLATE = """
                     <li><span class="command">Любой текст</span> - Автоматически создаст конспект</li>
                 </ul>
                 <div style="margin-top: 20px;">
-                    <a href="https://t.me/{bot_username}" class="btn" target="_blank">Открыть бота в Telegram</a>
+                    <a href="https://t.me/Konspekt_help_bot" class="btn" target="_blank">Открыть бота в Telegram</a>
                     <a href="/setup-webhook" class="btn btn-success">Настроить вебхук</a>
                 </div>
             </div>
@@ -273,7 +273,7 @@ HTML_TEMPLATE = """
         </div>
         
         <footer>
-            <p>© 2024 Konspekt Helper Bot | Развернуто на Render.com | <a href="https://render.com" style="color: #4A00E0;">Render.com</a></p>
+            <p>© 2024 @Konspekt_help_bot | Развернуто на Render.com | <a href="https://render.com" style="color: #4A00E0;">Render.com</a></p>
             <p style="margin-top: 10px; font-size: 0.9em;">Бот автоматически засыпает после 15 минут бездействия (бесплатный тариф Render)</p>
         </footer>
     </div>
@@ -350,13 +350,13 @@ class SimpleBot:
     def __init__(self, token):
         self.token = token
         self.bot_url = f"https://api.telegram.org/bot{token}"
-        logger.info(f"Бот инициализирован с токеном: {token[:10]}...")
+        logger.info(f"Бот @Konspekt_help_bot инициализирован")
         
     def start(self, update_id, chat_id):
         """Обработка команды /start"""
         welcome_text = (
-            "👋 Привет! Я Konspekt Helper Bot!\n\n"
-            "Я помогу тебе создавать конспекты из текста.\n\n"
+            "👋 Привет! Я @Konspekt_help_bot!\n\n"
+            "Я помогу тебе создавать конспекты из любого текста.\n\n"
             "📝 *Как использовать:*\n"
             "1. Отправь мне любой текст\n"
             "2. Используй команду /conspect [текст]\n"
@@ -365,46 +365,35 @@ class SimpleBot:
             "/help - справка и примеры\n"
             "/id - узнать свой Telegram ID\n"
             "/site - веб-панель управления ботом\n\n"
+            "✨ *Пример:*\n"
+            "Отправь мне: \n"
+            "`Машинное обучение - это область искусственного интеллекта, которая позволяет компьютерам обучаться на данных без явного программирования.`\n\n"
             "Просто отправь мне текст и я начну работу!"
         )
         
         # Обновление статистики
-        user_key = str(chat_id)
-        today = datetime.now().strftime("%Y-%m-%d")
-        
-        if user_key not in stats["user_activity"]:
-            stats["total_users"] += 1
-            stats["user_activity"][user_key] = {"first_seen": datetime.now(), "last_seen": datetime.now(), "message_count": 0}
-        
-        stats["user_activity"][user_key]["last_seen"] = datetime.now()
-        stats["user_activity"][user_key]["message_count"] += 1
-        
-        if stats["user_activity"][user_key].get("last_active_date") != today:
-            stats["active_today"] += 1
-            stats["user_activity"][user_key]["last_active_date"] = today
-        
-        stats["total_messages"] += 1
+        self._update_stats(chat_id)
         
         return self._send_message(chat_id, welcome_text)
     
     def help_command(self, update_id, chat_id):
         """Обработка команды /help"""
         help_text = (
-            "📚 *Konspekt Helper Bot - Помощь*\n\n"
+            "📚 *@Konspekt_help_bot - Помощь*\n\n"
             "Я создаю структурированные конспекты из любого текста.\n\n"
             "✨ *Примеры использования:*\n\n"
             "1. *Прямой текст:*\n"
-            "   Просто отправь мне любой текст\n"
-            "   `ИИ меняет мир. Машинное обучение...`\n\n"
+            "   Просто отправь мне текст\n"
+            "   `ИИ меняет мир. Машинное обучение позволяет...`\n\n"
             "2. *Команда /conspect:*\n"
             "   `/conspect Квантовые компьютеры используют кубиты...`\n\n"
             "3. *Длинные тексты:*\n"
             "   Я обрабатываю сообщения до 4000 символов\n\n"
             "📋 *Формат конспекта:*\n"
-            "• Основная идея\n"
-            "• Ключевые тезисы\n"
-            "• Термины и определения\n"
-            "• Выводы\n\n"
+            "• 🎯 Основная идея\n"
+            "• 📌 Ключевые тезисы\n"
+            "• 🔑 Термины и определения\n"
+            "• 💎 Выводы\n\n"
             "🔧 *Другие команды:*\n"
             "• /id - ваш Telegram ID\n"
             "• /site - веб-панель управления\n"
@@ -412,35 +401,37 @@ class SimpleBot:
             "Попробуй отправить мне текст прямо сейчас! ✨"
         )
         
-        stats["total_messages"] += 1
+        self._update_stats(chat_id)
         return self._send_message(chat_id, help_text)
     
     def get_user_id(self, update_id, chat_id):
         """Обработка команды /id"""
-        response = f"🆔 Ваш Telegram ID: `{chat_id}`\n\nЭтот идентификатор используется для:\n• Статистики использования\n• Отладки работы бота\n• Персонализированных функций (в будущем)"
+        response = f"🆔 Ваш Telegram ID: `{chat_id}`\n\nЭтот идентификатор используется для:\n• Статистики использования\n• Отладки работы бота\n• Персонализированных функций"
         
-        stats["total_messages"] += 1
+        self._update_stats(chat_id)
         return self._send_message(chat_id, response)
     
     def site_command(self, update_id, chat_id):
         """Обработка команды /site"""
-        web_url = os.getenv("RENDER_EXTERNAL_URL", "https://ваш-сервис.onrender.com")
+        web_url = os.getenv("RENDER_EXTERNAL_URL", "https://konspekt-helper-bot.onrender.com")
         response = f"🌐 *Веб-панель управления ботом*\n\n{web_url}\n\nНа сайте вы найдете:\n• 📊 Статистику использования\n• 🔗 Информацию о вебхуке\n• ⚙️ Системную информацию\n• 📨 Логи последних запросов"
         
-        stats["total_messages"] += 1
+        self._update_stats(chat_id)
         return self._send_message(chat_id, response)
     
     def create_conspect(self, update_id, chat_id, text):
         """Создание конспекта из текста"""
+        if not text.strip():
+            return self._send_message(chat_id, "📝 Пожалуйста, укажите текст для создания конспекта.\n\nПример: /conspect Машинное обучение - это...")
+        
         # Обновление статистики
         stats["conspects_created"] += 1
-        stats["total_messages"] += 1
+        self._update_stats(chat_id)
         
-        # Пример простого создания конспекта
-        # В реальном приложении здесь может быть более сложная логика
+        # Создаем конспект
         conspect = self._generate_conspect(text)
         
-        response = f"📝 *Ваш конспект готов!*\n\n{conspect}\n\n✨ Конспект создан с помощью Konspekt Helper Bot"
+        response = f"📝 *Ваш конспект готов!*\n\n{conspect}\n\n✨ Создано с помощью @Konspekt_help_bot"
         return self._send_message(chat_id, response)
     
     def handle_message(self, update_id, chat_id, text):
@@ -458,26 +449,59 @@ class SimpleBot:
         
         # Ограничиваем длину текста для конспекта
         if len(text) > 1000:
-            text = text[:1000] + "..."
+            text_preview = text[:300] + "..."
+        else:
+            text_preview = text
+        
+        # Разбиваем текст на предложения для ключевых тезисов
+        sentences = text_preview.split('. ')
+        key_points = sentences[:3]  # Берем первые 3 предложения
         
         conspect = (
             "📋 *Структурированный конспект*\n\n"
             "🎯 *Основная идея:*\n"
-            "Автор обсуждает важную тему, выделяя ключевые аспекты.\n\n"
+            f"Текст посвящен важной теме, содержащей ключевую информацию.\n\n"
             "📌 *Ключевые тезисы:*\n"
-            "• " + text[:200].replace('\n', '\n• ') + "\n"
-            "• Основные концепции представлены в тексте\n"
-            "• Приведены важные детали и примеры\n\n"
-            "🔑 *Термины и определения:*\n"
-            "• *Конспект* - краткое изложение содержания\n"
-            "• *Структура* - организация информации\n"
-            "• *Анализ* - разбор и изучение материала\n\n"
+        )
+        
+        for i, point in enumerate(key_points, 1):
+            if point.strip():
+                conspect += f"{i}. {point.strip()}\n"
+        
+        conspect += (
+            "\n🔑 *Термины и определения:*\n"
+            "• *Конспект* - краткое изложение основных мыслей текста\n"
+            "• *Структура* - организация информации для лучшего понимания\n"
+            "• *Анализ* - разбор материала на составляющие элементы\n\n"
             "💎 *Выводы:*\n"
-            "Текст содержит полезную информацию, которая может быть "
-            "структурирована для лучшего запоминания и использования."
+            "Представленный материал содержит ценные сведения, которые "
+            "структурированы для эффективного запоминания и использования. "
+            "Конспект помогает выделить самое важное из текста."
         )
         
         return conspect
+    
+    def _update_stats(self, chat_id):
+        """Обновление статистики"""
+        user_key = str(chat_id)
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        if user_key not in stats["user_activity"]:
+            stats["total_users"] += 1
+            stats["user_activity"][user_key] = {
+                "first_seen": datetime.now(), 
+                "last_seen": datetime.now(), 
+                "message_count": 0
+            }
+        
+        stats["user_activity"][user_key]["last_seen"] = datetime.now()
+        stats["user_activity"][user_key]["message_count"] += 1
+        
+        if stats["user_activity"][user_key].get("last_active_date") != today:
+            stats["active_today"] += 1
+            stats["user_activity"][user_key]["last_active_date"] = today
+        
+        stats["total_messages"] += 1
     
     def _send_message(self, chat_id, text):
         """Отправка сообщения через Telegram Bot API"""
@@ -501,8 +525,8 @@ class SimpleBot:
             return None
     
     def run_webhook(self):
-        """Запуск бота в режиме вебхука (не используется напрямую)"""
-        logger.info("Бот готов к работе через вебхуки")
+        """Запуск бота в режиме вебхука"""
+        logger.info("Бот @Konspekt_help_bot готов к работе через вебхуки")
 
 class BotServer(BaseHTTPRequestHandler):
     """HTTP сервер для обработки вебхуков и веб-сайта"""
@@ -539,7 +563,8 @@ class BotServer(BaseHTTPRequestHandler):
         
         try:
             update = json.loads(post_data.decode('utf-8'))
-            logger.info(f"Получен вебхук: {update}")
+            update_id = update.get('update_id', 0)
+            logger.info(f"Получен вебхук #{update_id} для @Konspekt_help_bot")
             
             # Логируем вебхук
             self._log_webhook(update)
@@ -549,7 +574,7 @@ class BotServer(BaseHTTPRequestHandler):
             
             # Отправляем успешный ответ
             self._set_headers('application/json')
-            self.wfile.write(json.dumps({"status": "ok"}).encode('utf-8'))
+            self.wfile.write(json.dumps({"status": "ok", "bot": "@Konspekt_help_bot"}).encode('utf-8'))
             
         except Exception as e:
             logger.error(f"Ошибка обработки вебхука: {e}")
@@ -558,12 +583,10 @@ class BotServer(BaseHTTPRequestHandler):
     
     def _serve_main_page(self):
         """Главная страница веб-сайта"""
-        bot_username = os.getenv("BOT_USERNAME", "KonspektHelperBot")
-        webhook_url = os.getenv("RENDER_EXTERNAL_URL", "https://ваш-сервис.onrender.com") + "/webhook"
+        webhook_url = os.getenv("RENDER_EXTERNAL_URL", "https://konspekt-helper-bot.onrender.com") + "/webhook"
         start_time = stats["start_time"]
         
         html_content = HTML_TEMPLATE.format(
-            bot_username=bot_username,
             webhook_url=webhook_url,
             start_time=start_time
         )
@@ -576,12 +599,13 @@ class BotServer(BaseHTTPRequestHandler):
         health_data = {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "service": "konspekt-helper-bot",
+            "bot": "@Konspekt_help_bot",
             "version": "1.0.0",
             "stats": {
                 "uptime": str(datetime.now() - datetime.strptime(stats["start_time"], "%Y-%m-%d %H:%M:%S")),
                 "total_messages": stats["total_messages"],
-                "active_users": len(stats["user_activity"])
+                "active_users": len(stats["user_activity"]),
+                "conspects_created": stats["conspects_created"]
             }
         }
         
@@ -602,6 +626,7 @@ class BotServer(BaseHTTPRequestHandler):
         stats_data = {
             "status": "ok",
             "timestamp": datetime.now().isoformat(),
+            "bot": "@Konspekt_help_bot",
             "stats": {
                 "total_users": stats["total_users"],
                 "total_messages": stats["total_messages"],
@@ -609,12 +634,13 @@ class BotServer(BaseHTTPRequestHandler):
                 "conspects_created": stats["conspects_created"],
                 "uptime": stats["start_time"]
             },
-            "webhook_status": True,  # Предполагаем, что вебхук настроен
-            "recent_webhooks": stats["recent_webhooks"][-10:],  # Последние 10
+            "webhook_status": True,
+            "recent_webhooks": stats["recent_webhooks"][-10:],
             "server_info": {
                 "python_version": "3.11.8",
                 "bot_library": "python-telegram-bot 13.15",
-                "hosting": "Render.com"
+                "hosting": "Render.com",
+                "bot_username": "Konspekt_help_bot"
             }
         }
         
@@ -624,44 +650,60 @@ class BotServer(BaseHTTPRequestHandler):
     def _setup_webhook_page(self):
         """Страница настройки вебхука"""
         token = os.getenv("TELEGRAM_TOKEN", "")
-        webhook_url = os.getenv("RENDER_EXTERNAL_URL", "https://ваш-сервис.onrender.com") + "/webhook"
+        webhook_url = os.getenv("RENDER_EXTERNAL_URL", "https://konspekt-helper-bot.onrender.com") + "/webhook"
         
         html_content = f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Настройка вебхука</title>
+            <title>Настройка вебхука для @Konspekt_help_bot</title>
             <style>
-                body {{ font-family: Arial, sans-serif; padding: 20px; }}
-                .container {{ max-width: 800px; margin: 0 auto; }}
-                .code {{ background: #f4f4f4; padding: 10px; border-radius: 5px; font-family: monospace; }}
-                .btn {{ background: #4A00E0; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0; }}
+                body {{ font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }}
+                .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }}
+                h1 {{ color: #4A00E0; border-bottom: 2px solid #4A00E0; padding-bottom: 10px; }}
+                .code {{ background: #f8f9fa; padding: 15px; border-radius: 5px; font-family: monospace; margin: 15px 0; border-left: 4px solid #4A00E0; }}
+                .btn {{ background: #4A00E0; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 5px; font-weight: bold; }}
+                .step {{ margin: 25px 0; padding: 20px; background: #f8f9fa; border-radius: 8px; }}
+                .step-number {{ display: inline-block; background: #4A00E0; color: white; width: 30px; height: 30px; border-radius: 50%; text-align: center; line-height: 30px; margin-right: 10px; }}
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>⚙️ Настройка вебхука для Telegram бота</h1>
+                <h1>⚙️ Настройка вебхука для @Konspekt_help_bot</h1>
                 
-                <p><strong>Текущий URL вебхука:</strong></p>
-                <div class="code">{webhook_url}</div>
-                
-                <p><strong>Команда для настройки вебхука:</strong></p>
-                <div class="code">
-                curl "https://api.telegram.org/bot{token}/setWebhook?url={webhook_url}"
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <strong>Текущий URL вебхука:</strong>
+                    <div class="code">{webhook_url}</div>
                 </div>
                 
-                <p><strong>Проверить статус вебхука:</strong></p>
-                <div class="code">
-                curl "https://api.telegram.org/bot{token}/getWebhookInfo"
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <strong>Настроить вебхук (выполнить в терминале):</strong>
+                    <div class="code">
+                    curl "https://api.telegram.org/bot{token}/setWebhook?url={webhook_url}"
+                    </div>
                 </div>
                 
-                <p><strong>Удалить вебхук (перейти на polling):</strong></p>
-                <div class="code">
-                curl "https://api.telegram.org/bot{token}/deleteWebhook"
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <strong>Проверить статус вебхука:</strong>
+                    <div class="code">
+                    curl "https://api.telegram.org/bot{token}/getWebhookInfo"
+                    </div>
                 </div>
                 
-                <div style="margin-top: 30px;">
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <strong>Удалить вебхук (если нужно):</strong>
+                    <div class="code">
+                    curl "https://api.telegram.org/bot{token}/deleteWebhook"
+                    </div>
+                </div>
+                
+                <div style="margin-top: 30px; text-align: center;">
                     <a href="/" class="btn">← Вернуться на главную</a>
+                    <a href="https://t.me/Konspekt_help_bot" class="btn" target="_blank">Открыть бота</a>
                 </div>
             </div>
         </body>
@@ -690,21 +732,25 @@ class BotServer(BaseHTTPRequestHandler):
         if "message" in update:
             msg = update["message"]
             chat = msg.get("chat", {})
-            text = msg.get("text", "")
+            text = msg.get("text", "Без текста")
             
-            return f"Сообщение от {chat.get('id')}: {text[:50]}..."
+            # Обрезаем длинный текст
+            if len(text) > 50:
+                text = text[:50] + "..."
+            
+            return f"Сообщение от пользователя {chat.get('id')}: {text}"
         elif "edited_message" in update:
             return "Измененное сообщение"
         elif "callback_query" in update:
             return "Callback запрос"
         else:
-            return f"Неизвестный тип: {list(update.keys())}"
+            return f"Тип обновления: {list(update.keys())}"
     
     def _process_update(self, update):
         """Обработка обновления от Telegram"""
         token = os.getenv("TELEGRAM_TOKEN")
         if not token:
-            logger.error("TELEGRAM_TOKEN не установлен")
+            logger.error("TELEGRAM_TOKEN не установлен для @Konspekt_help_bot")
             return
         
         bot = SimpleBot(token)
@@ -730,17 +776,14 @@ class BotServer(BaseHTTPRequestHandler):
                 elif text.startswith('/conspect'):
                     # Убираем команду из текста
                     conspect_text = text[9:].strip()
-                    if conspect_text:
-                        bot.create_conspect(update_id, chat_id, conspect_text)
-                    else:
-                        bot._send_message(chat_id, "Пожалуйста, укажите текст после команды /conspect")
+                    bot.create_conspect(update_id, chat_id, conspect_text)
                 else:
-                    bot._send_message(chat_id, f"Неизвестная команда: {text}")
+                    bot._send_message(chat_id, f"Неизвестная команда: {text}\n\nИспользуйте /help для списка команд")
             elif text:
                 # Обработка обычного сообщения
                 bot.handle_message(update_id, chat_id, text)
             else:
-                bot._send_message(chat_id, "Пожалуйста, отправьте текстовое сообщение")
+                bot._send_message(chat_id, "📝 Пожалуйста, отправьте текстовое сообщение для создания конспекта.")
     
     def log_message(self, format, *args):
         """Переопределение логирования для уменьшения шума"""
@@ -754,12 +797,12 @@ def start_bot():
         logger.error("Переменная окружения TELEGRAM_TOKEN не установлена!")
         logger.info("Пожалуйста, установите TELEGRAM_TOKEN на Render.com")
         logger.info("Затем настройте вебхук командой:")
-        logger.info(f'curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://ваш-сервис.onrender.com/webhook"')
+        logger.info('curl "https://api.telegram.org/bot<ВАШ_ТОКЕН>/setWebhook?url=https://ваш-сервис.onrender.com/webhook"')
         return
     
     bot = SimpleBot(token)
     bot.run_webhook()
-    logger.info("Бот инициализирован и готов к работе через вебхуки")
+    logger.info("Бот @Konspekt_help_bot инициализирован и готов к работе через вебхуки")
 
 def start_http_server():
     """Запуск HTTP сервера"""
@@ -768,32 +811,13 @@ def start_http_server():
     
     httpd = HTTPServer(server_address, BotServer)
     logger.info(f"HTTP сервер запущен на порту {port}")
-    logger.info(f"Главная страница: http://localhost:{port}")
+    logger.info(f"Веб-сайт: http://localhost:{port}")
     logger.info(f"Health check: http://localhost:{port}/health")
-    logger.info(f"Статистика JSON: http://localhost:{port}/stats.json")
+    logger.info(f"Статистика: http://localhost:{port}/stats.json")
+    logger.info(f"Вебхук: http://localhost:{port}/webhook")
     
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         logger.info("Сервер остановлен")
-    except Exception as e:
-        logger.error(f"Ошибка сервера: {e}")
-
-if __name__ == "__main__":
-    logger.info("=" * 50)
-    logger.info("Запуск Konspekt Helper Bot на Render.com")
-    logger.info("=" * 50)
-    
-    # Проверяем обязательные переменные окружения
-    token = os.getenv("TELEGRAM_TOKEN")
-    if token:
-        logger.info(f"TELEGRAM_TOKEN найден: {token[:10]}...")
-    else:
-        logger.warning("TELEGRAM_TOKEN не найден! Бот будет работать в режиме только веб-сайта")
-    
-    # Запускаем в отдельных потоках
-    bot_thread = threading.Thread(target=start_bot, daemon=True)
-    bot_thread.start()
-    
-    # Основной поток запускает HTTP сервер
-    start_http_server()
+    except
