@@ -9,6 +9,3 @@ services:
         sync: false
       - key: PORT
         value: 10000
-      - key: BOT_USERNAME
-        value: KonspektHelperBot
-        optional: true
