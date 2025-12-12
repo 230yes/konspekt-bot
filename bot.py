@@ -820,4 +820,26 @@ def start_http_server():
         httpd.serve_forever()
     except KeyboardInterrupt:
         logger.info("Сервер остановлен")
-    except
+    except Exception as e:
+        logger.error(f"Ошибка сервера: {e}")
+
+if __name__ == "__main__":
+    logger.info("=" * 60)
+    logger.info("Запуск @Konspekt_help_bot на Render.com")
+    logger.info("=" * 60)
+    
+    # Проверяем обязательные переменные окружения
+    token = os.getenv("TELEGRAM_TOKEN")
+    if token:
+        logger.info(f"TELEGRAM_TOKEN найден: {token[:10]}...")
+        logger.info("Бот будет отвечать на сообщения через вебхуки")
+    else:
+        logger.warning("TELEGRAM_TOKEN не найден! Бот будет работать в режиме только веб-сайта")
+        logger.info("Добавьте TELEGRAM_TOKEN в переменные окружения Render")
+    
+    # Запускаем в отдельных потоках
+    bot_thread = threading.Thread(target=start_bot, daemon=True)
+    bot_thread.start()
+    
+    # Основной поток запускает HTTP сервер
+    start_http_server()
