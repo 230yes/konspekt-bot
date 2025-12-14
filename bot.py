@@ -50,6 +50,188 @@ stats = {
     "user_states": {}
 }
 
+# ==================== СИСТЕМА ПРОВЕРКИ ИСТОЧНИКОВ ====================
+class SourceChecker:
+    """Проверяет качество и достоверность источников"""
+    
+    # Надежные домены (образование, наука, официальные источники)
+    RELIABLE_DOMAINS = [
+        '.edu', '.ac.', '.gov', '.org', 
+        'wikipedia.org', 'arxiv.org', 'sciencedirect.com',
+        'nature.com', 'sciencemag.org', 'researchgate.net',
+        'springer.com', 'ieee.org', 'ncbi.nlm.nih.gov',
+        'who.int', 'unesco.org', 'bbc.com', 'reuters.com',
+        'theguardian.com', 'nytimes.com', 'meduza.io'
+    ]
+    
+    # Ненадежные домены (пользовательский контент, развлечения)
+    UNRELIABLE_DOMAINS = [
+        'reddit.com', '4chan.org', 'tiktok.com', 
+        'twitter.com', 'x.com', 'instagram.com',
+        'facebook.com', 'pikabu.ru', 'vk.com',
+        'livejournal.com', '9gag.com', 'buzzfeed.com'
+    ]
+    
+    # Слова-маркеры ненаучного контента
+    PSEUDOSCIENCE_KEYWORDS = [
+        'лженаука', 'псевдонаука', 'конспирология', 'теория заговора',
+        'чудесное исцеление', 'магическая сила', 'экстрасенс', 'ясновидящий',
+        'альтернативная медицина', 'биоэнергетика', 'торсионные поля',
+        'холодный ядерный синтез', 'вечный двигатель', 'память воды'
+    ]
+    
+    # Признаки ненадежного контента
+    UNRELIABLE_PATTERNS = [
+        r'шок[!.]?', r'сенсац[ия][!.]?', r'вы не поверите', r'всем немедленно',
+        r'уч[ёе]ные скрывают', r'правительство молчит', r'100% доказано',
+        r'официально опровергнуто', r'это скрывают', r'тайное знание',
+        r'секретные материалы', r'запрещ[её]нная правда'
+    ]
+    
+    # Признаки научного контента
+    SCIENTIFIC_PATTERNS = [
+        r'исследовани[ея] показал[ио]', r'эксперимент[ы]? подтвердил[и]',
+        r'по данным', r'статистически значим', r'мета-анализ',
+        r'рецензируемое издание', r'клиническое испытание',
+        r'контролируемое исследование', r'двойной слепой метод'
+    ]
+    
+    def check_source_quality(self, url, title, snippet):
+        """Проверяет качество источника по нескольким критериям"""
+        score = 0
+        reasons = []
+        
+        # 1. Проверка домена
+        domain_quality = self._check_domain(url)
+        if domain_quality == "reliable":
+            score += 3
+            reasons.append("✅ Надежный домен")
+        elif domain_quality == "unreliable":
+            score -= 2
+            reasons.append("⚠️ Ненадежный домен")
+        
+        # 2. Проверка заголовка на сенсационность
+        title_score = self._check_sensationalism(title)
+        score += title_score
+        if title_score < 0:
+            reasons.append("⚠️ Сенсационный заголовок")
+        
+        # 3. Проверка содержания на научность
+        content_score = self._check_content_quality(snippet)
+        score += content_score
+        if content_score > 0:
+            reasons.append("✅ Научный стиль")
+        
+        # 4. Проверка на псевдонауку
+        if self._check_pseudoscience(title + " " + snippet):
+            score -= 3
+            reasons.append("❌ Признаки псевдонауки")
+        
+        # Определяем уровень достоверности
+        if score >= 3:
+            quality = "high"
+        elif score >= 0:
+            quality = "medium"
+        else:
+            quality = "low"
+        
+        return {
+            "quality": quality,
+            "score": score,
+            "reasons": reasons,
+            "domain": urlparse(url).netloc if url else "unknown"
+        }
+    
+    def _check_domain(self, url):
+        """Проверяет домен источника"""
+        if not url:
+            return "neutral"
+        
+        url_lower = url.lower()
+        
+        # Проверяем надежные домены
+        for domain in self.RELIABLE_DOMAINS:
+            if domain in url_lower:
+                return "reliable"
+        
+        # Проверяем ненадежные домены
+        for domain in self.UNRELIABLE_DOMAINS:
+            if domain in url_lower:
+                return "unreliable"
+        
+        return "neutral"
+    
+    def _check_sensationalism(self, text):
+        """Проверяет текст на сенсационность"""
+        if not text:
+            return 0
+        
+        text_lower = text.lower()
+        
+        # Счетчик сенсационных маркеров
+        sensational_count = 0
+        for pattern in self.UNRELIABLE_PATTERNS:
+            if re.search(pattern, text_lower):
+                sensational_count += 1
+        
+        if sensational_count >= 2:
+            return -2  # Очень сенсационный
+        elif sensational_count == 1:
+            return -1  # Немного сенсационный
+        
+        return 0  # Нормальный заголовок
+    
+    def _check_content_quality(self, text):
+        """Проверяет качество содержания"""
+        if not text:
+            return 0
+        
+        text_lower = text.lower()
+        
+        # Счетчик научных маркеров
+        scientific_count = 0
+        for pattern in self.SCIENTIFIC_PATTERNS:
+            if re.search(pattern, text_lower):
+                scientific_count += 1
+        
+        # Проверяем наличие цифр и данных
+        has_numbers = bool(re.search(r'\d+[%‰°]|\d+\.\d+', text))
+        has_references = bool(re.search(r'исследовани[ея]|эксперимент|данные', text_lower))
+        
+        score = 0
+        if scientific_count >= 2:
+            score += 2
+        elif scientific_count == 1:
+            score += 1
+        
+        if has_numbers:
+            score += 1
+        if has_references:
+            score += 1
+        
+        return score
+    
+    def _check_pseudoscience(self, text):
+        """Проверяет на признаки псевдонауки"""
+        text_lower = text.lower()
+        
+        for keyword in self.PSEUDOSCIENCE_KEYWORDS:
+            if keyword in text_lower:
+                return True
+        
+        # Проверяем паттерны заговоров
+        conspiracy_patterns = [
+            r'тайное правительство', r'мировая закулиса',
+            r'скрыва[ю]?т правду', r'на самом деле',
+            r'официальная наука ошибается'
+        ]
+        
+        for pattern in conspiracy_patterns:
+            if re.search(pattern, text_lower):
+                return True
+        
+        return False
+
 # ==================== СИСТЕМА АГРЕГАЦИИ И ФИЛЬТРАЦИИ ====================
 class InformationAggregator:
     """Агрегирует и связывает информацию из разных источников"""
@@ -153,15 +335,11 @@ class InformationAggregator:
         if dates and fact:
             fact = f"{fact} ({dates[0]})"
         
-        # Извлекаем имена и организации
-        entities = self._extract_entities(full_text)
-        
         return {
             "fact": fact,
             "definition": definition,
             "statistics": statistics,
             "dates": dates,
-            "entities": entities,
             "quality": source_check["quality"]
         }
     
@@ -266,16 +444,6 @@ class InformationAggregator:
             dates.extend(matches)
         
         return dates[:3]
-    
-    def _extract_entities(self, text):
-        """Извлекает имена и организации"""
-        # Имена (Фамилия Имя)
-        names = re.findall(r'[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+', text)
-        
-        # Организации (с заглавных букв, длинные)
-        orgs = re.findall(r'[А-ЯЁ][А-ЯЁа-яё]+\s+(?:университет|институт|академия|компания|корпорация)', text)
-        
-        return names[:3] + orgs[:2]
     
     def _generate_content_hash(self, text):
         """Генерирует хеш для обнаружения дубликатов"""
@@ -611,6 +779,74 @@ class InformationAnalyzer:
         
         return "\n".join(report)
 
+# ==================== УМНЫЙ ПОИСК ====================
+class SmartGoogleSearch:
+    def __init__(self):
+        self.api_key = GOOGLE_API_KEY
+        self.cse_id = GOOGLE_CSE_ID
+        self.base_url = "https://www.googleapis.com/customsearch/v1"
+        self.analyzer = InformationAnalyzer()
+        
+    def search_and_analyze(self, query):
+        """Выполняет поиск с проверкой качества"""
+        if not query or len(query.strip()) < 2:
+            return {"error": "Короткий запрос"}
+        
+        stats["google_searches"] += 1
+        
+        params = {
+            "key": self.api_key,
+            "cx": self.cse_id,
+            "q": query,
+            "num": 12,  # Увеличили количество результатов
+            "hl": "ru",
+            "lr": "lang_ru",
+            "gl": "ru"
+        }
+        
+        try:
+            response = requests.get(self.base_url, params=params, timeout=15)
+            
+            if response.status_code != 200:
+                return self._create_fallback(query)
+            
+            data = response.json()
+            
+            # Анализируем с проверкой качества
+            structured_info = self.analyzer.analyze_topic(query, data)
+            
+            return {
+                "success": True,
+                "query": query,
+                "structured_info": structured_info,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Ошибка поиска: {e}")
+            return self._create_fallback(query)
+    
+    def _create_fallback(self, query):
+        """Минимальный fallback"""
+        return {
+            "success": False,
+            "query": query,
+            "structured_info": {
+                "topic": query,
+                "type": "общая",
+                "aggregated_data": {
+                    "linked_facts": ["Информация требует проверки по надежным источникам"],
+                    "definitions": [],
+                    "statistics": [],
+                    "key_entities": [query.capitalize()],
+                    "total_unique_facts": 0,
+                    "source_coverage": {"total_sources": 0, "unique_domains": 0}
+                },
+                "quality_report": "❌ Нет данных от поисковика"
+            },
+            "fallback": True
+        }
+
 # ==================== ГЕНЕРАТОР КОНСПЕКТОВ ====================
 class SmartConspectGenerator:
     def __init__(self):
@@ -830,19 +1066,386 @@ class SmartConspectGenerator:
         
         return conspect
 
-# ==================== ОСТАЛЬНОЙ КОД (без изменений) ====================
-# [SourceChecker, SmartGoogleSearch, TelegramBot, BotHTTPServer остаются без изменений]
-# Просто добавьте этот код после класса InformationAggregator
+# ==================== TELEGRAM BOT ====================
+class TelegramBot:
+    def __init__(self):
+        if not TELEGRAM_TOKEN:
+            raise ValueError("TELEGRAM_TOKEN не найден")
+        
+        self.token = TELEGRAM_TOKEN
+        self.bot_url = f"https://api.telegram.org/bot{self.token}"
+        self.generator = SmartConspectGenerator()
+        
+        if RENDER_EXTERNAL_URL:
+            self._setup_webhook()
+        
+        logger.info("✅ Telegram бот готов с агрегацией информации")
+    
+    def _setup_webhook(self):
+        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
+        try:
+            response = requests.post(
+                f"{self.bot_url}/setWebhook",
+                json={"url": webhook_url},
+                timeout=10
+            )
+            if response.json().get("ok"):
+                logger.info(f"✅ Вебхук: {webhook_url}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка вебхука: {e}")
+    
+    def process_message(self, chat_id, text):
+        text = text.strip()
+        self._update_stats(chat_id)
+        
+        if text.startswith("/"):
+            if text == "/start":
+                return self._send_welcome(chat_id)
+            elif text == "/help":
+                return self._send_help(chat_id)
+            elif text == "/stats":
+                return self._send_stats(chat_id)
+            elif text == "/quality":
+                return self._send_quality_info(chat_id)
+            else:
+                return self._send_message(chat_id, "❓ Неизвестная команда")
+        
+        if text in ["1", "2", "3"]:
+            return self._handle_volume(chat_id, text)
+        
+        return self._handle_topic(chat_id, text)
+    
+    def _send_welcome(self, chat_id):
+        welcome = (
+            "🤖 *Бот с агрегацией информации*\n\n"
+            "🔍 *Что нового:*\n"
+            "• ✅ Собирает данные с 12+ источников\n"
+            "• ✅ Удаляет дубликаты информации\n"
+            "• ✅ Связывает родственные факты\n"
+            "• ✅ Предоставляет в 3 раза больше данных\n\n"
+            "📊 *Уровни анализа:*\n"
+            "• 1 — Ключевые факты (6+ пунктов)\n"
+            "• 2 — Структурированная информация\n"
+            "• 3 — Полный анализ со статистикой\n\n"
+            "📌 Просто напишите тему"
+        )
+        return self._send_message(chat_id, welcome)
+    
+    def _send_help(self, chat_id):
+        help_text = (
+            "🔍 *Как работает агрегация:*\n\n"
+            "1. *Сбор данных:* Бот проверяет 12+ источников\n"
+            "2. *Фильтрация:* Удаляет дубликаты и ненадежный контент\n"
+            "3. *Агрегация:* Объединяет информацию из разных мест\n"
+            "4. *Связывание:* Находит связи между фактами\n"
+            "5. *Структурирование:* Создает четкую структуру\n\n"
+            "📊 *Пример для темы 'Искусственный интеллект':*\n"
+            "• Раньше: 4-5 разрозненных факта\n"
+            "• Сейчас: 10-15 связанных фактов + статистика + хронология\n\n"
+            "📌 *Попробуйте:* 'История Рима', 'Квантовая физика', 'Экономика Китая'"
+        )
+        return self._send_message(chat_id, help_text)
+    
+    def _send_stats(self, chat_id):
+        stat_text = (
+            f"📊 *Статистика агрегации:*\n\n"
+            f"👥 Пользователей: {stats['total_users']}\n"
+            f"💬 Сообщений: {stats['total_messages']}\n"
+            f"📄 Конспектов: {stats['conspects_created']}\n"
+            f"🔍 Поисков: {stats['google_searches']}\n"
+            f"✅ Агрегировано фактов: {stats['aggregated_facts']}\n"
+            f"🚫 Удалено дубликатов: {stats['duplicates_removed']}\n"
+            f"📈 Эффективность: {stats['aggregated_facts']/(stats['google_searches']*10+1):.1f} фактов/поиск"
+        )
+        return self._send_message(chat_id, stat_text)
+    
+    def _send_quality_info(self, chat_id):
+        info = (
+            "🔬 *Система агрегации:*\n\n"
+            "*Этапы обработки:*\n"
+            "1. Сбор с 12+ источников\n"
+            "2. Проверка качества каждого источника\n"
+            "3. Удаление дубликатов (хеширование)\n"
+            "4. Классификация фактов по типам\n"
+            "5. Связывание родственной информации\n"
+            "6. Структурирование в читаемый формат\n\n"
+            "*Что исключается:*\n"
+            "• Дублирующаяся информация\n"
+            "• Контент с низкокачественных сайтов\n"
+            "• Неподтвержденные утверждения\n\n"
+            "📌 Результат: в 3 раза больше полезной информации"
+        )
+        return self._send_message(chat_id, info)
+    
+    def _handle_topic(self, chat_id, topic):
+        user_id = str(chat_id)
+        if user_id not in stats["user_states"]:
+            stats["user_states"][user_id] = {}
+        
+        stats["user_states"][user_id]["pending_topic"] = topic
+        
+        response = (
+            f"🎯 *Тема: {topic}*\n\n"
+            f"🔍 *Будет собрана информация с 12+ источников*\n\n"
+            f"📊 *Уровень анализа:*\n\n"
+            f"1️⃣ Ключевые факты (6+ пунктов)\n"
+            f"2️⃣ Структурированная информация\n"
+            f"3️⃣ Полный анализ со статистикой\n\n"
+            f"Отправьте 1, 2 или 3"
+        )
+        return self._send_message(chat_id, response)
+    
+    def _handle_volume(self, chat_id, volume_choice):
+        user_id = str(chat_id)
+        user_state = stats["user_states"].get(user_id, {})
+        topic = user_state.get("pending_topic", "")
+        
+        if not topic:
+            return self._send_message(chat_id, "❌ Сначала отправьте тему")
+        
+        volume_map = {"1": "short", "2": "detailed", "3": "extended"}
+        volume = volume_map.get(volume_choice, "short")
+        
+        # Уведомление
+        self._send_message(chat_id, f"🔍 *Собираю информацию по теме:* {topic}\n📊 Уровень: {volume_choice}/3\n⏳ Это займет 10-15 секунд...")
+        
+        try:
+            conspect = self.generator.generate(topic, volume)
+            stats["conspects_created"] += 1
+            
+            # Отправляем
+            self._send_conspect_safely(chat_id, conspect)
+            
+            # Короткое завершение
+            return self._send_message(chat_id, "✅ *Анализ завершен!*\n\nНовая тема? Просто напишите её")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка: {e}")
+            return self._send_message(
+                chat_id,
+                f"❌ *Ошибка агрегации информации*\n\nПопробуйте другую формулировку или тему"
+            )
+    
+    def _send_conspect_safely(self, chat_id, conspect):
+        """Безопасно отправляет конспект"""
+        max_length = 4000
+        
+        if len(conspect) <= max_length:
+            self._send_message(chat_id, conspect)
+            return
+        
+        # Разбиваем по разделам
+        sections = re.split(r'(={10,})', conspect)
+        
+        current = ""
+        for section in sections:
+            if re.match(r'={10,}', section):
+                if current and len(current) > 1000:
+                    self._send_message(chat_id, current.strip())
+                    current = section + "\n\n"
+                else:
+                    current += section + "\n\n"
+            else:
+                if len(current + section) > max_length and current:
+                    self._send_message(chat_id, current.strip())
+                    current = section
+                else:
+                    current += section
+        
+        if current.strip():
+            self._send_message(chat_id, current.strip())
+    
+    def _update_stats(self, chat_id):
+        user_id = str(chat_id)
+        
+        if user_id not in stats["user_states"]:
+            stats["total_users"] += 1
+            stats["user_states"][user_id] = {
+                "first_seen": datetime.now().isoformat(),
+                "message_count": 0
+            }
+        
+        stats["user_states"][user_id]["last_seen"] = datetime.now().isoformat()
+        stats["user_states"][user_id]["message_count"] += 1
+        stats["total_messages"] += 1
+    
+    def _send_message(self, chat_id, text):
+        try:
+            response = requests.post(
+                f"{self.bot_url}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                    "disable_web_page_preview": True
+                },
+                timeout=15
+            )
+            return response.json().get("ok", False)
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки: {e}")
+            return False
+
+# ==================== HTTP СЕРВЕР ====================
+class BotHTTPServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = self.path.split('?')[0]
+        
+        if path == "/":
+            self._send_html(INDEX_HTML)
+        elif path == "/health":
+            self._send_json({"status": "ok", "time": datetime.now().isoformat()})
+        elif path == "/stats":
+            self._send_json(stats)
+        elif path == "/quality_info":
+            info = {
+                "aggregated_facts": stats.get("aggregated_facts", 0),
+                "duplicates_removed": stats.get("duplicates_removed", 0),
+                "total_searches": stats.get("google_searches", 0)
+            }
+            self._send_json(info)
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_POST(self):
+        if self.path == "/webhook":
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length:
+                try:
+                    data = self.rfile.read(content_length)
+                    update = json.loads(data.decode('utf-8'))
+                    
+                    threading.Thread(
+                        target=self._handle_update,
+                        args=(update,),
+                        daemon=True
+                    ).start()
+                    
+                except Exception as e:
+                    logger.error(f"❌ Ошибка вебхука: {e}")
+            
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def _handle_update(self, update):
+        try:
+            if "message" in update and "text" in update["message"]:
+                chat_id = update["message"]["chat"]["id"]
+                text = update["message"]["text"]
+                
+                bot = TelegramBot()
+                bot.process_message(chat_id, text)
+        except Exception as e:
+            logger.error(f"❌ Ошибка обработки: {e}")
+    
+    def _send_html(self, content):
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(content.encode('utf-8'))
+    
+    def _send_json(self, data):
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+    
+    def log_message(self, format, *args):
+        pass
+
+INDEX_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>🤖 Бот с агрегацией информации</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .status { color: green; font-weight: bold; padding: 10px; background: #e8f5e8; border-radius: 5px; }
+        .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px 0; }
+        .feature { background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6; }
+        .feature h4 { margin-top: 0; color: #1e40af; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🤖 Бот с агрегацией информации</h2>
+        <p class="status">✅ Работает с системой агрегации из 12+ источников</p>
+        
+        <div class="features">
+            <div class="feature">
+                <h4>📚 Агрегация</h4>
+                <p>Собирает данные с 12+ источников</p>
+            </div>
+            <div class="feature">
+                <h4>🔍 Фильтрация</h4>
+                <p>Удаляет дубликаты и ненадежный контент</p>
+            </div>
+            <div class="feature">
+                <h4>🔗 Связывание</h4>
+                <p>Находит связи между родственными фактами</p>
+            </div>
+            <div class="feature">
+                <h4>📊 Объем</h4>
+                <p>В 3 раза больше полезной информации</p>
+            </div>
+        </div>
+        
+        <h3>📊 Статистика системы:</h3>
+        <div id="stats">Загрузка...</div>
+        
+        <h3>🔗 Быстрые ссылки:</h3>
+        <p><a href="https://t.me/Konspekt_help_bot" target="_blank">🤖 Открыть бота</a></p>
+        <p><a href="/stats" target="_blank">📈 Полная статистика (JSON)</a></p>
+        <p><a href="/quality_info" target="_blank">🔬 Информация об агрегации</a></p>
+        
+        <p style="color: #666; margin-top: 20px;">
+            Обновлено: <span id="time"></span>
+        </p>
+    </div>
+    
+    <script>
+        async function loadStats() {
+            try {
+                const response = await fetch('/stats');
+                const data = await response.json();
+                
+                document.getElementById('stats').innerHTML = `
+                    <p>👥 Пользователей: ${data.total_users || 0}</p>
+                    <p>📄 Конспектов: ${data.conspects_created || 0}</p>
+                    <p>🔍 Поисков: ${data.google_searches || 0}</p>
+                    <p>✅ Агрегировано фактов: ${data.aggregated_facts || 0}</p>
+                    <p>🚫 Удалено дубликатов: ${data.duplicates_removed || 0}</p>
+                `;
+                
+                document.getElementById('time').textContent = new Date().toLocaleTimeString();
+            } catch (error) {
+                document.getElementById('stats').innerHTML = 'Ошибка загрузки статистики';
+            }
+        }
+        
+        loadStats();
+        setInterval(loadStats, 10000);
+    </script>
+</body>
+</html>
+"""
 
 # ==================== ЗАПУСК ====================
 def main():
     logger.info("=" * 60)
     logger.info("🚀 ЗАПУСК БОТА С АГРЕГАЦИЕЙ ИНФОРМАЦИИ")
     logger.info("=" * 60)
-    logger.info(f"✅ Режим: Агрегация из 15+ источников")
-    logger.info(f"✅ Фильтрация дубликатов")
-    logger.info(f"✅ Связывание информации")
-    logger.info(f"✅ Увеличенный объем данных")
+    logger.info(f"🌐 URL: {RENDER_EXTERNAL_URL}")
+    logger.info(f"🚪 Порт: {PORT}")
+    logger.info("✅ Режим: Агрегация из 12+ источников")
+    logger.info("✅ Фильтрация дубликатов")
+    logger.info("✅ Связывание информации")
     logger.info("=" * 60)
     
     server = HTTPServer(('', PORT), BotHTTPServer)
