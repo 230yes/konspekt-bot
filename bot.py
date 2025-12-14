@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Улучшенный Konspekt Helper Bot - Агрегация информации
-Бот связывает информацию из разных источников, убирает дубли и предоставляет больше данных
+Улучшенный Konspekt Helper Bot с исправлением API поиска
 """
 
 import os
@@ -13,11 +12,6 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import random
 import re
-import html
-from urllib.parse import urlparse
-from collections import Counter, defaultdict
-import hashlib
-from difflib import SequenceMatcher
 
 # ==================== НАСТРОЙКА ====================
 logging.basicConfig(
@@ -36,814 +30,388 @@ if not TELEGRAM_TOKEN:
     logger.error("❌ TELEGRAM_TOKEN не установлен!")
     exit(1)
 
+# Проверяем наличие API ключа
+if not GOOGLE_API_KEY:
+    logger.warning("⚠️ GOOGLE_API_KEY не установлен! Будет использоваться ограниченный режим")
+
 # ==================== СТАТИСТИКА ====================
 stats = {
     "total_users": 0,
     "total_messages": 0,
     "conspects_created": 0,
     "google_searches": 0,
-    "reliable_sources": 0,
-    "filtered_sources": 0,
-    "aggregated_facts": 0,
-    "duplicates_removed": 0,
+    "api_errors": 0,
+    "fallback_mode": 0,
     "start_time": datetime.now().isoformat(),
     "user_states": {}
 }
 
-# ==================== СИСТЕМА ПРОВЕРКИ ИСТОЧНИКОВ ====================
-class SourceChecker:
-    """Проверяет качество и достоверность источников"""
+# ==================== БАЗА ЗНАНИЙ ДЛЯ FALLBACK ====================
+KNOWLEDGE_BASE = {
+    # Научные темы
+    "искусственный интеллект": [
+        "Искусственный интеллект (ИИ) — область компьютерных наук, занимающаяся созданием машин, способных выполнять задачи, требующие человеческого интеллекта",
+        "Основные направления ИИ: машинное обучение, обработка естественного языка, компьютерное зрение",
+        "ИИ применяется в медицине, финансах, транспорте, образовании и многих других сферах",
+        "Этические вопросы ИИ включают приватность данных, предвзятость алгоритмов и влияние на рабочие места"
+    ],
+    "квантовая физика": [
+        "Квантовая физика — раздел физики, изучающий поведение микрочастиц на квантовом уровне",
+        "Основные принципы: квантовая суперпозиция, квантовая запутанность, принцип неопределенности Гейзенберга",
+        "Квантовые компьютеры используют кубиты вместо битов и могут решать сложные задачи быстрее классических",
+        "Квантовая механика лежит в основе современных технологий: лазеры, транзисторы, МРТ"
+    ],
+    "генетика": [
+        "Генетика — наука о наследственности и изменчивости организмов",
+        "ДНК содержит генетическую информацию в виде последовательности нуклеотидов",
+        "Генная инженерия позволяет изменять геном организмов для медицинских и сельскохозяйственных целей",
+        "CRISPR-Cas9 — революционная технология редактирования генома"
+    ],
     
-    # Надежные домены (образование, наука, официальные источники)
-    RELIABLE_DOMAINS = [
-        '.edu', '.ac.', '.gov', '.org', 
-        'wikipedia.org', 'arxiv.org', 'sciencedirect.com',
-        'nature.com', 'sciencemag.org', 'researchgate.net',
-        'springer.com', 'ieee.org', 'ncbi.nlm.nih.gov',
-        'who.int', 'unesco.org', 'bbc.com', 'reuters.com',
-        'theguardian.com', 'nytimes.com', 'meduza.io'
+    # Исторические темы
+    "древний рим": [
+        "Древний Рим существовал с 753 года до н.э. по 476 год н.э.",
+        "Римское право стало основой многих современных правовых систем",
+        "Римская империя достигла максимальных размеров при императоре Траяне",
+        "Колизей — самый большой амфитеатр Древнего Рима, вмещавший до 50000 зрителей"
+    ],
+    "вторая мировая война": [
+        "Вторая мировая война длилась с 1939 по 1945 год",
+        "В войне участвовали 62 страны, погибло около 70 миллионов человек",
+        "Важнейшие сражения: Сталинградская битва, высадка в Нормандии, битва за Москву",
+        "Война завершилась капитуляцией Германии и Японии"
+    ],
+    
+    # Технологические темы
+    "блокчейн": [
+        "Блокчейн — распределенная база данных, хранящая информацию в виде цепочки блоков",
+        "Каждый блок содержит хеш предыдущего блока, что обеспечивает неизменность данных",
+        "Блокчейн используется в криптовалютах, смарт-контрактах, системах голосования",
+        "Биткойн — первая и самая известная криптовалюта на основе блокчейна"
+    ],
+    "большие данные": [
+        "Большие данные (Big Data) — огромные объемы структурированных и неструктурированных данных",
+        "Характеристики больших данных: объем, скорость, разнообразие, достоверность",
+        "Технологии обработки: Hadoop, Spark, NoSQL базы данных",
+        "Применяются в аналитике, машинном обучении, интернете вещей"
+    ],
+    
+    # Медицинские темы
+    "вирус иммунодефицита человека": [
+        "ВИЧ — вирус, поражающий иммунную систему человека",
+        "Передается через кровь, половым путем и от матери к ребенку",
+        "СПИД — терминальная стадия ВИЧ-инфекции",
+        "Антиретровирусная терапия позволяет контролировать вирус и продлевать жизнь"
+    ],
+    "вакцинация": [
+        "Вакцинация — введение вакцины для создания иммунитета к заболеванию",
+        "Первая вакцина была создана Эдвардом Дженнером против оспы в 1796 году",
+        "Вакцины спасают 2-3 миллиона жизней ежегодно",
+        "Гердальный иммунитет возникает при вакцинации 70-90% населения"
     ]
-    
-    # Ненадежные домены (пользовательский контент, развлечения)
-    UNRELIABLE_DOMAINS = [
-        'reddit.com', '4chan.org', 'tiktok.com', 
-        'twitter.com', 'x.com', 'instagram.com',
-        'facebook.com', 'pikabu.ru', 'vk.com',
-        'livejournal.com', '9gag.com', 'buzzfeed.com'
-    ]
-    
-    # Слова-маркеры ненаучного контента
-    PSEUDOSCIENCE_KEYWORDS = [
-        'лженаука', 'псевдонаука', 'конспирология', 'теория заговора',
-        'чудесное исцеление', 'магическая сила', 'экстрасенс', 'ясновидящий',
-        'альтернативная медицина', 'биоэнергетика', 'торсионные поля',
-        'холодный ядерный синтез', 'вечный двигатель', 'память воды'
-    ]
-    
-    # Признаки ненадежного контента
-    UNRELIABLE_PATTERNS = [
-        r'шок[!.]?', r'сенсац[ия][!.]?', r'вы не поверите', r'всем немедленно',
-        r'уч[ёе]ные скрывают', r'правительство молчит', r'100% доказано',
-        r'официально опровергнуто', r'это скрывают', r'тайное знание',
-        r'секретные материалы', r'запрещ[её]нная правда'
-    ]
-    
-    # Признаки научного контента
-    SCIENTIFIC_PATTERNS = [
-        r'исследовани[ея] показал[ио]', r'эксперимент[ы]? подтвердил[и]',
-        r'по данным', r'статистически значим', r'мета-анализ',
-        r'рецензируемое издание', r'клиническое испытание',
-        r'контролируемое исследование', r'двойной слепой метод'
-    ]
-    
-    def check_source_quality(self, url, title, snippet):
-        """Проверяет качество источника по нескольким критериям"""
-        score = 0
-        reasons = []
-        
-        # 1. Проверка домена
-        domain_quality = self._check_domain(url)
-        if domain_quality == "reliable":
-            score += 3
-            reasons.append("✅ Надежный домен")
-        elif domain_quality == "unreliable":
-            score -= 2
-            reasons.append("⚠️ Ненадежный домен")
-        
-        # 2. Проверка заголовка на сенсационность
-        title_score = self._check_sensationalism(title)
-        score += title_score
-        if title_score < 0:
-            reasons.append("⚠️ Сенсационный заголовок")
-        
-        # 3. Проверка содержания на научность
-        content_score = self._check_content_quality(snippet)
-        score += content_score
-        if content_score > 0:
-            reasons.append("✅ Научный стиль")
-        
-        # 4. Проверка на псевдонауку
-        if self._check_pseudoscience(title + " " + snippet):
-            score -= 3
-            reasons.append("❌ Признаки псевдонауки")
-        
-        # Определяем уровень достоверности
-        if score >= 3:
-            quality = "high"
-        elif score >= 0:
-            quality = "medium"
-        else:
-            quality = "low"
-        
-        return {
-            "quality": quality,
-            "score": score,
-            "reasons": reasons,
-            "domain": urlparse(url).netloc if url else "unknown"
-        }
-    
-    def _check_domain(self, url):
-        """Проверяет домен источника"""
-        if not url:
-            return "neutral"
-        
-        url_lower = url.lower()
-        
-        # Проверяем надежные домены
-        for domain in self.RELIABLE_DOMAINS:
-            if domain in url_lower:
-                return "reliable"
-        
-        # Проверяем ненадежные домены
-        for domain in self.UNRELIABLE_DOMAINS:
-            if domain in url_lower:
-                return "unreliable"
-        
-        return "neutral"
-    
-    def _check_sensationalism(self, text):
-        """Проверяет текст на сенсационность"""
-        if not text:
-            return 0
-        
-        text_lower = text.lower()
-        
-        # Счетчик сенсационных маркеров
-        sensational_count = 0
-        for pattern in self.UNRELIABLE_PATTERNS:
-            if re.search(pattern, text_lower):
-                sensational_count += 1
-        
-        if sensational_count >= 2:
-            return -2  # Очень сенсационный
-        elif sensational_count == 1:
-            return -1  # Немного сенсационный
-        
-        return 0  # Нормальный заголовок
-    
-    def _check_content_quality(self, text):
-        """Проверяет качество содержания"""
-        if not text:
-            return 0
-        
-        text_lower = text.lower()
-        
-        # Счетчик научных маркеров
-        scientific_count = 0
-        for pattern in self.SCIENTIFIC_PATTERNS:
-            if re.search(pattern, text_lower):
-                scientific_count += 1
-        
-        # Проверяем наличие цифр и данных
-        has_numbers = bool(re.search(r'\d+[%‰°]|\d+\.\d+', text))
-        has_references = bool(re.search(r'исследовани[ея]|эксперимент|данные', text_lower))
-        
-        score = 0
-        if scientific_count >= 2:
-            score += 2
-        elif scientific_count == 1:
-            score += 1
-        
-        if has_numbers:
-            score += 1
-        if has_references:
-            score += 1
-        
-        return score
-    
-    def _check_pseudoscience(self, text):
-        """Проверяет на признаки псевдонауки"""
-        text_lower = text.lower()
-        
-        for keyword in self.PSEUDOSCIENCE_KEYWORDS:
-            if keyword in text_lower:
-                return True
-        
-        # Проверяем паттерны заговоров
-        conspiracy_patterns = [
-            r'тайное правительство', r'мировая закулиса',
-            r'скрыва[ю]?т правду', r'на самом деле',
-            r'официальная наука ошибается'
-        ]
-        
-        for pattern in conspiracy_patterns:
-            if re.search(pattern, text_lower):
-                return True
-        
-        return False
+}
 
-# ==================== СИСТЕМА АГРЕГАЦИИ И ФИЛЬТРАЦИИ ====================
-class InformationAggregator:
-    """Агрегирует и связывает информацию из разных источников"""
-    
-    def __init__(self):
-        self.source_checker = SourceChecker()
-        
-    def aggregate_information(self, items, query):
-        """Агрегирует информацию из разных источников"""
-        # Собираем все данные
-        all_facts = []
-        all_definitions = []
-        all_statistics = []
-        sources_by_domain = defaultdict(list)
-        content_hashes = set()  # Для обнаружения дубликатов
-        
-        for item in items[:15]:  # Проверяем больше источников
-            title = item.get("title", "")
-            snippet = item.get("snippet", "")
-            link = item.get("link", "")
-            
-            # Проверяем качество источника
-            source_check = self.source_checker.check_source_quality(link, title, snippet)
-            
-            # Пропускаем низкокачественные источники
-            if source_check["quality"] == "low":
-                continue
-            
-            # Извлекаем и обрабатываем информацию
-            processed_data = self._process_source_item(title, snippet, link, query, source_check)
-            
-            if processed_data:
-                # Проверяем на дубликаты по хешу содержимого
-                content_hash = self._generate_content_hash(processed_data["fact"])
-                if content_hash in content_hashes:
-                    stats["duplicates_removed"] += 1
-                    continue
-                
-                content_hashes.add(content_hash)
-                
-                # Добавляем факты
-                if processed_data["fact"]:
-                    all_facts.append({
-                        "text": processed_data["fact"],
-                        "source": link,
-                        "domain": urlparse(link).netloc,
-                        "quality": source_check["quality"],
-                        "type": self._classify_fact_type(processed_data["fact"])
-                    })
-                
-                # Добавляем определения
-                if processed_data["definition"]:
-                    all_definitions.append(processed_data["definition"])
-                
-                # Добавляем статистику
-                all_statistics.extend(processed_data["statistics"])
-                
-                # Группируем источники по доменам
-                domain = urlparse(link).netloc
-                sources_by_domain[domain].append({
-                    "url": link,
-                    "quality": source_check["quality"]
-                })
-        
-        # Анализируем и связываем информацию
-        analyzed_info = self._analyze_and_link_facts(all_facts, query)
-        
-        # Объединяем информацию
-        result = {
-            "linked_facts": analyzed_info["linked_facts"],
-            "fact_clusters": analyzed_info["fact_clusters"],
-            "definitions": self._merge_definitions(all_definitions)[:6],
-            "statistics": self._merge_statistics(all_statistics)[:10],
-            "timeline_data": analyzed_info["timeline_data"][:5],
-            "comparison_data": analyzed_info["comparison_data"][:5],
-            "key_entities": analyzed_info["key_entities"][:12],
-            "controversial_points": analyzed_info["controversial_points"][:3],
-            "source_coverage": self._calculate_source_coverage(sources_by_domain),
-            "total_unique_facts": len(analyzed_info["linked_facts"]),
-            "domains_used": list(sources_by_domain.keys())[:8]
-        }
-        
-        stats["aggregated_facts"] += len(result["linked_facts"])
-        return result
-    
-    def _process_source_item(self, title, snippet, link, query, source_check):
-        """Обрабатывает информацию из одного источника"""
-        full_text = f"{title}. {snippet}"
-        
-        # Извлекаем факт
-        fact = self._extract_comprehensive_fact(full_text, query)
-        
-        # Извлекаем определение
-        definition = self._extract_enhanced_definition(full_text)
-        
-        # Извлекаем статистику
-        statistics = self._extract_detailed_statistics(full_text)
-        
-        # Извлекаем даты и временные метки
-        dates = self._extract_dates(full_text)
-        if dates and fact:
-            fact = f"{fact} ({dates[0]})"
-        
-        return {
-            "fact": fact,
-            "definition": definition,
-            "statistics": statistics,
-            "dates": dates,
-            "quality": source_check["quality"]
-        }
-    
-    def _extract_comprehensive_fact(self, text, query):
-        """Извлекает развернутый факт с контекстом"""
-        sentences = re.split(r'[.!?]+', text)
-        
-        relevant_sentences = []
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if 40 < len(sentence) < 250:
-                if self._is_comprehensive_sentence(sentence, query):
-                    relevant_sentences.append(sentence)
-        
-        if not relevant_sentences:
-            return None
-        
-        # Объединяем связанные предложения
-        if len(relevant_sentences) > 1:
-            # Находим наиболее информативное предложение
-            best_sentence = max(relevant_sentences, key=lambda s: len(s.split()))
-            return best_sentence[:220]
-        
-        return relevant_sentences[0][:200]
-    
-    def _is_comprehensive_sentence(self, sentence, query):
-        """Проверяет, является ли предложение информативным"""
-        sentence_lower = sentence.lower()
-        query_words = [w.lower() for w in query.split() if len(w) > 3]
-        
-        # Проверяем релевантность
-        relevance_score = sum(1 for word in query_words if word in sentence_lower)
-        
-        # Проверяем информативность
-        has_specifics = bool(re.search(r'\d{4}|\d+%|\d+\.\d+', sentence))
-        has_entities = bool(re.search(r'[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+', sentence))
-        has_verbs = len([w for w in sentence.split() if w.endswith(('ся', 'ть', 'л', 'ла'))]) > 1
-        
-        return (relevance_score > 0 or has_specifics) and (has_verbs or has_entities)
-    
-    def _extract_enhanced_definition(self, text):
-        """Извлекает улучшенное определение с контекстом"""
-        patterns = [
-            r'это\s+[^.!?]{10,150}(?:[.!?]|\s+—\s+[^.!?]{5,50})',
-            r'определ[яю]ется\s+как\s+[^.!?]{10,150}[.!?]',
-            r'является\s+[^.!?]{10,150}(?:[.!?]|\s+—\s+[^.!?]{5,50})',
-            r'под\s+[^.!?]{3,20}\s+понима[юя]т\s+[^.!?]{10,150}[.!?]'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                definition = match.group(0).strip()
-                if 30 < len(definition) < 180:
-                    # Добавляем контекст если есть
-                    context_match = re.search(r'[^.!?]{10,80}\s+—\s+', definition)
-                    if context_match:
-                        return definition[:160] + "..."
-                    else:
-                        return definition[:140] + "..."
-        
-        return None
-    
-    def _extract_detailed_statistics(self, text):
-        """Извлекает детальную статистику"""
-        patterns = [
-            # Проценты с контекстом
-            r'\d+\.?\d*%\s+(?:[^.!?]{5,40})',
-            # Большие числа с пояснением
-            r'\d+[,.]?\d*\s*(?:млн|млрд|тыс|миллион|миллиард|тысяч)[^.!?]{5,40}',
-            # Деньги с контекстом
-            r'\$\d+[,.]?\d*\s+(?:[^.!?]{5,30})',
-            # Даты и периоды
-            r'\d{4}\s*(?:год[уа]?|г\.?)\s+(?:[^.!?]{5,30})',
-            # Диапазоны
-            r'от\s+\d+\s+до\s+\d+\s+(?:[^.!?]{5,20})',
-            # Сравнения
-            r'в\s+\d+[,.]?\d*\s+раза\s+(?:[^.!?]{5,30})'
-        ]
-        
-        statistics = []
-        for pattern in patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            for match in matches:
-                if 10 < len(match) < 100:
-                    statistics.append(match.strip())
-        
-        return list(set(statistics))[:8]
-    
-    def _extract_dates(self, text):
-        """Извлекает даты"""
-        patterns = [
-            r'\d{1,2}\s+[а-яё]+\s+\d{4}',
-            r'\d{4}\s+год[ау]?',
-            r'в\s+\d{4}\s+году',
-            r'\d{1,2}\.\d{1,2}\.\d{4}'
-        ]
-        
-        dates = []
-        for pattern in patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            dates.extend(matches)
-        
-        return dates[:3]
-    
-    def _generate_content_hash(self, text):
-        """Генерирует хеш для обнаружения дубликатов"""
-        if not text:
-            return ""
-        # Нормализуем текст (убираем пробелы, приводим к нижнему регистру)
-        normalized = re.sub(r'\s+', ' ', text.lower()).strip()
-        return hashlib.md5(normalized.encode()).hexdigest()[:16]
-    
-    def _classify_fact_type(self, fact):
-        """Классифицирует тип факта"""
-        fact_lower = fact.lower()
-        
-        if re.search(r'\d{4}|\d+\.\d+|\d+%', fact):
-            return "statistical"
-        elif any(word in fact_lower for word in ['обнаружен', 'открыт', 'изобретён']):
-            return "discovery"
-        elif any(word in fact_lower for word in ['вызвал', 'привел', 'последствием']):
-            return "consequence"
-        elif any(word in fact_lower for word in ['согласно', 'по данным', 'исследование']):
-            return "research"
-        elif any(word in fact_lower for word in ['важн', 'значени', 'влияни']):
-            return "significance"
-        
-        return "general"
-    
-    def _analyze_and_link_facts(self, facts, query):
-        """Анализирует и связывает факты из разных источников"""
-        if not facts:
-            return {
-                "linked_facts": [],
-                "fact_clusters": [],
-                "timeline_data": [],
-                "comparison_data": [],
-                "key_entities": [],
-                "controversial_points": []
-            }
-        
-        # Группируем факты по типам и темам
-        fact_clusters = defaultdict(list)
-        
-        for fact in facts:
-            fact_type = fact["type"]
-            fact_clusters[fact_type].append(fact)
-        
-        # Создаем связанные факты
-        linked_facts = []
-        
-        # 1. Статистические факты с разных источников
-        if "statistical" in fact_clusters:
-            stats_facts = fact_clusters["statistical"]
-            if len(stats_facts) >= 2:
-                linked = self._link_statistical_facts(stats_facts)
-                linked_facts.extend(linked)
-        
-        # 2. Факты об открытиях и изобретениях
-        if "discovery" in fact_clusters:
-            disc_facts = fact_clusters["discovery"]
-            linked_facts.extend([f["text"] for f in disc_facts[:3]])
-        
-        # 3. Факты о последствиях
-        if "consequence" in fact_clusters:
-            cons_facts = fact_clusters["consequence"]
-            if cons_facts:
-                linked_facts.append(f"🔗 Последствия: {cons_facts[0]['text']}")
-        
-        # 4. Общие факты
-        if "general" in fact_clusters:
-            gen_facts = fact_clusters["general"]
-            linked_facts.extend([f["text"] for f in gen_facts[:5]])
-        
-        # 5. Если мало связанных фактов, добавляем лучшие из всех
-        if len(linked_facts) < 8:
-            all_facts_sorted = sorted(facts, key=lambda x: len(x["text"]), reverse=True)
-            additional_facts = [f["text"] for f in all_facts_sorted[:10] 
-                              if f["text"] not in linked_facts]
-            linked_facts.extend(additional_facts[:8-len(linked_facts)])
-        
-        # Извлекаем ключевые сущности
-        key_entities = self._extract_key_entities_from_facts(facts)
-        
-        # Находим потенциально спорные моменты
-        controversial = self._find_controversial_points(facts)
-        
-        # Создаем временные данные
-        timeline_data = self._create_timeline_data(facts)
-        
-        # Данные для сравнения
-        comparison_data = self._create_comparison_data(facts)
-        
-        return {
-            "linked_facts": linked_facts[:15],  # Больше фактов
-            "fact_clusters": [{k: len(v)} for k, v in fact_clusters.items()],
-            "timeline_data": timeline_data,
-            "comparison_data": comparison_data,
-            "key_entities": key_entities,
-            "controversial_points": controversial
-        }
-    
-    def _link_statistical_facts(self, stats_facts):
-        """Связывает статистические факты"""
-        if len(stats_facts) < 2:
-            return [f["text"] for f in stats_facts]
-        
-        # Группируем по схожим числам
-        number_groups = defaultdict(list)
-        
-        for fact in stats_facts:
-            numbers = re.findall(r'\d+\.?\d*', fact["text"])
-            for num in numbers[:2]:
-                if float(num) > 1:  # Игнорируем маленькие числа
-                    key = f"{float(num):.1f}"
-                    number_groups[key].append(fact)
-        
-        linked = []
-        for num, facts in number_groups.items():
-            if len(facts) >= 2:
-                # Находим общую тему
-                domains = set(f["domain"] for f in facts)
-                sources_info = f"({len(facts)} источника: {', '.join(list(domains)[:2])})"
-                best_fact = max(facts, key=lambda f: len(f["text"]))
-                linked.append(f"📊 {best_fact['text']} {sources_info}")
-            else:
-                linked.append(f"📊 {facts[0]['text']}")
-        
-        return linked[:5]
-    
-    def _extract_key_entities_from_facts(self, facts):
-        """Извлекает ключевые сущности из фактов"""
-        all_text = " ".join([f["text"] for f in facts])
-        
-        # Имена и организации
-        entities = re.findall(r'[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+|[А-ЯЁ][А-ЯЁа-яё]+\s+(?:университет|институт)', all_text)
-        
-        # Уникальные и отсортированные по частоте
-        entity_counter = Counter(entities)
-        return [entity for entity, count in entity_counter.most_common(15)]
-    
-    def _find_controversial_points(self, facts):
-        """Находит потенциально спорные моменты"""
-        if len(facts) < 3:
-            return []
-        
-        # Ищем утверждения с модальными глаголами и оценочными словами
-        controversial_patterns = [
-            r'вероятно', r'возможно', r'предположительно',
-            r'спорно', r'дискуссионно', r'противоречиво',
-            r'некоторые считают', r'по мнению'
-        ]
-        
-        controversial = []
-        for fact in facts:
-            fact_lower = fact["text"].lower()
-            for pattern in controversial_patterns:
-                if re.search(pattern, fact_lower):
-                    controversial.append(f"💬 {fact['text'][:120]}...")
-                    break
-        
-        return controversial[:4]
-    
-    def _create_timeline_data(self, facts):
-        """Создает данные для временной линии"""
-        timeline = []
-        
-        for fact in facts:
-            # Ищем годы в фактах
-            years = re.findall(r'\b\d{4}\b', fact["text"])
-            for year in years[:2]:
-                if 1000 < int(year) < 2100:
-                    # Упрощаем факт для временной линии
-                    clean_fact = re.sub(r'\([^)]*\)', '', fact["text"])
-                    clean_fact = clean_fact[:80] + ("..." if len(clean_fact) > 80 else "")
-                    timeline.append(f"{year}: {clean_fact}")
-        
-        # Сортируем по году
-        timeline.sort(key=lambda x: int(re.search(r'\d{4}', x).group()))
-        return timeline[:8]
-    
-    def _create_comparison_data(self, facts):
-        """Создает данные для сравнения"""
-        if len(facts) < 2:
-            return []
-        
-        # Ищем факты с числами для сравнения
-        comparison = []
-        for i in range(min(3, len(facts))):
-            for j in range(i+1, min(4, len(facts))):
-                fact1, fact2 = facts[i], facts[j]
-                
-                # Извлекаем числа из фактов
-                nums1 = re.findall(r'\d+\.?\d*', fact1["text"])
-                nums2 = re.findall(r'\d+\.?\d*', fact2["text"])
-                
-                if nums1 and nums2:
-                    try:
-                        num1 = float(nums1[0])
-                        num2 = float(nums2[0])
-                        if num1 > 0 and num2 > 0 and abs(num1 - num2) > 0.1:
-                            ratio = max(num1, num2) / min(num1, num2)
-                            if 1.5 < ratio < 10:  # Разумное отношение
-                                comparison.append(f"📈 Сравнение: {num1:.1f} vs {num2:.1f} (в {ratio:.1f} раз)")
-                    except ValueError:
-                        continue
-        
-        return comparison[:4]
-    
-    def _merge_definitions(self, definitions):
-        """Объединяет определения"""
-        if not definitions:
-            return []
-        
-        # Убираем похожие определения
-        unique_defs = []
-        for def1 in definitions:
-            is_duplicate = False
-            for def2 in unique_defs:
-                similarity = SequenceMatcher(None, def1.lower(), def2.lower()).ratio()
-                if similarity > 0.7:  # Более 70% совпадение
-                    is_duplicate = True
-                    break
-            
-            if not is_duplicate:
-                unique_defs.append(def1)
-        
-        return unique_defs
-    
-    def _merge_statistics(self, statistics):
-        """Объединяет статистику"""
-        if not statistics:
-            return []
-        
-        # Группируем по типам
-        percent_stats = [s for s in statistics if '%' in s]
-        money_stats = [s for s in statistics if any(w in s.lower() for w in ['$', 'доллар', 'рубл', 'евро'])]
-        other_stats = [s for s in statistics if s not in percent_stats and s not in money_stats]
-        
-        merged = []
-        if percent_stats:
-            merged.append(f"📊 Проценты: {', '.join(percent_stats[:3])}")
-        if money_stats:
-            merged.append(f"💰 Финансы: {', '.join(money_stats[:3])}")
-        if other_stats:
-            merged.extend(other_stats[:5])
-        
-        return merged
-    
-    def _calculate_source_coverage(self, sources_by_domain):
-        """Рассчитывает охват источников"""
-        total_sources = sum(len(sources) for sources in sources_by_domain.values())
-        unique_domains = len(sources_by_domain)
-        
-        coverage = {
-            "total_sources": total_sources,
-            "unique_domains": unique_domains,
-            "domain_distribution": {domain: len(sources) 
-                                  for domain, sources in list(sources_by_domain.items())[:5]}
-        }
-        
-        # Рассчитываем разнообразие
-        if total_sources > 0:
-            diversity_score = unique_domains / total_sources
-            coverage["diversity_score"] = f"{diversity_score:.2f}"
-            if diversity_score > 0.4:
-                coverage["assessment"] = "✅ Высокое разнообразие источников"
-            elif diversity_score > 0.2:
-                coverage["assessment"] = "⚠️ Среднее разнообразие источников"
-            else:
-                coverage["assessment"] = "❌ Низкое разнообразие источников"
-        
-        return coverage
-
-# ==================== ОСНОВНОЙ АНАЛИЗАТОР ====================
-class InformationAnalyzer:
-    """Основной анализатор с агрегацией"""
-    
-    def __init__(self):
-        self.aggregator = InformationAggregator()
-        self.source_checker = SourceChecker()
-    
-    def analyze_topic(self, query, search_results):
-        """Анализирует тему с агрегацией информации"""
-        items = search_results.get("items", [])
-        
-        # Агрегируем информацию
-        aggregated_data = self.aggregator.aggregate_information(items, query)
-        
-        return {
-            "topic": query,
-            "type": self._determine_topic_type(query),
-            "aggregated_data": aggregated_data,
-            "timestamp": datetime.now().isoformat(),
-            "quality_report": self._generate_quality_report(aggregated_data)
-        }
-    
-    def _determine_topic_type(self, query):
-        """Определяет тип темы"""
-        query_lower = query.lower()
-        
-        science_terms = ["физика", "химия", "биология", "математика", "наука", "исследование"]
-        tech_terms = ["технология", "программирование", "искусственный интеллект", "компьютер"]
-        history_terms = ["история", "война", "революция", "древний", "средневековье"]
-        
-        if any(term in query_lower for term in science_terms):
-            return "научная"
-        elif any(term in query_lower for term in tech_terms):
-            return "технологическая"
-        elif any(term in query_lower for term in history_terms):
-            return "историческая"
-        
-        return "общая"
-    
-    def _generate_quality_report(self, aggregated_data):
-        """Генерирует отчет о качестве"""
-        coverage = aggregated_data.get("source_coverage", {})
-        total_facts = aggregated_data.get("total_unique_facts", 0)
-        
-        report = []
-        
-        if total_facts > 0:
-            report.append(f"✅ Найдено фактов: {total_facts}")
-        
-        if "total_sources" in coverage:
-            report.append(f"📚 Источников: {coverage['total_sources']}")
-        
-        if "unique_domains" in coverage:
-            report.append(f"🌐 Уникальных доменов: {coverage['unique_domains']}")
-        
-        if "assessment" in coverage:
-            report.append(coverage["assessment"])
-        
-        if aggregated_data.get("controversial_points"):
-            report.append(f"💬 Спорных моментов: {len(aggregated_data['controversial_points'])}")
-        
-        return "\n".join(report)
-
-# ==================== УМНЫЙ ПОИСК ====================
+# ==================== УЛУЧШЕННЫЙ ПОИСК ====================
 class SmartGoogleSearch:
     def __init__(self):
         self.api_key = GOOGLE_API_KEY
         self.cse_id = GOOGLE_CSE_ID
         self.base_url = "https://www.googleapis.com/customsearch/v1"
-        self.analyzer = InformationAnalyzer()
+        self.session = requests.Session()
+        self.session.timeout = 20
         
     def search_and_analyze(self, query):
-        """Выполняет поиск с проверкой качества"""
+        """Выполняет поиск с улучшенной обработкой ошибок"""
         if not query or len(query.strip()) < 2:
-            return {"error": "Короткий запрос"}
+            return {"error": "Слишком короткий запрос"}
         
         stats["google_searches"] += 1
         
-        params = {
-            "key": self.api_key,
-            "cx": self.cse_id,
-            "q": query,
-            "num": 12,  # Увеличили количество результатов
-            "hl": "ru",
-            "lr": "lang_ru",
-            "gl": "ru"
-        }
+        # Проверяем наличие API ключа
+        if not self.api_key:
+            logger.warning("⚠️ API ключ отсутствует, использую fallback")
+            return self._create_fallback_response(query)
         
         try:
-            response = requests.get(self.base_url, params=params, timeout=15)
+            # Пробуем разные параметры поиска
+            search_variants = [
+                {
+                    "key": self.api_key,
+                    "cx": self.cse_id,
+                    "q": query,
+                    "num": 8,
+                    "hl": "ru",
+                    "lr": "lang_ru",
+                    "gl": "ru"
+                },
+                {
+                    "key": self.api_key,
+                    "cx": self.cse_id,
+                    "q": query + " научные статьи",
+                    "num": 6,
+                    "hl": "ru"
+                },
+                {
+                    "key": self.api_key,
+                    "cx": self.cse_id,
+                    "q": query + " исследование",
+                    "num": 6,
+                    "hl": "ru"
+                }
+            ]
             
-            if response.status_code != 200:
-                return self._create_fallback(query)
+            search_results = []
             
-            data = response.json()
+            for params in search_variants:
+                try:
+                    logger.info(f"🔍 Поиск: {params['q']}")
+                    response = self.session.get(self.base_url, params=params, timeout=15)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if "items" in data:
+                            search_results.extend(data["items"])
+                            logger.info(f"✅ Найдено {len(data.get('items', []))} результатов")
+                        else:
+                            logger.warning("⚠️ В ответе нет items")
+                    else:
+                        logger.error(f"❌ Ошибка API: {response.status_code}")
+                        
+                except requests.exceptions.Timeout:
+                    logger.error("⏰ Таймаут запроса")
+                    continue
+                except requests.exceptions.ConnectionError:
+                    logger.error("🔌 Ошибка соединения")
+                    continue
+                except Exception as e:
+                    logger.error(f"❌ Ошибка поиска: {e}")
+                    continue
             
-            # Анализируем с проверкой качества
-            structured_info = self.analyzer.analyze_topic(query, data)
+            if not search_results:
+                logger.warning("⚠️ Не найдено результатов, использую fallback")
+                return self._create_fallback_response(query)
+            
+            # Анализируем результаты
+            analyzed_data = self._analyze_search_results(search_results, query)
             
             return {
                 "success": True,
                 "query": query,
-                "structured_info": structured_info,
-                "timestamp": datetime.now().isoformat()
+                "results": analyzed_data,
+                "total_results": len(search_results),
+                "timestamp": datetime.now().isoformat(),
+                "source": "google_search"
             }
             
         except Exception as e:
-            logger.error(f"Ошибка поиска: {e}")
-            return self._create_fallback(query)
+            stats["api_errors"] += 1
+            logger.error(f"❌ Критическая ошибка поиска: {e}")
+            return self._create_fallback_response(query)
     
-    def _create_fallback(self, query):
-        """Минимальный fallback"""
+    def _analyze_search_results(self, items, query):
+        """Анализирует результаты поиска"""
+        facts = []
+        definitions = []
+        statistics = []
+        
+        for item in items[:10]:  # Анализируем первые 10 результатов
+            title = item.get("title", "")
+            snippet = item.get("snippet", "")
+            link = item.get("link", "")
+            
+            # Извлекаем полезную информацию
+            text = f"{title}. {snippet}"
+            
+            # Ищем факты
+            fact = self._extract_fact(text, query)
+            if fact:
+                facts.append({
+                    "text": fact,
+                    "source": link,
+                    "domain": self._extract_domain(link)
+                })
+            
+            # Ищем определения
+            definition = self._extract_definition(text)
+            if definition:
+                definitions.append(definition)
+            
+            # Ищем статистику
+            stats_data = self._extract_statistics(text)
+            statistics.extend(stats_data)
+        
+        # Убираем дубликаты
+        facts = self._remove_duplicates(facts)
+        definitions = list(set(definitions))
+        statistics = list(set(statistics))
+        
+        # Извлекаем ключевые термины
+        key_terms = self._extract_key_terms(facts, definitions)
+        
         return {
-            "success": False,
-            "query": query,
-            "structured_info": {
-                "topic": query,
-                "type": "общая",
-                "aggregated_data": {
-                    "linked_facts": ["Информация требует проверки по надежным источникам"],
-                    "definitions": [],
+            "facts": facts[:8],
+            "definitions": definitions[:4],
+            "statistics": statistics[:6],
+            "key_terms": key_terms[:10],
+            "total_facts": len(facts),
+            "total_definitions": len(definitions)
+        }
+    
+    def _extract_fact(self, text, query):
+        """Извлекает факт из текста"""
+        sentences = re.split(r'[.!?]+', text)
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if 30 < len(sentence) < 200:
+                # Проверяем релевантность
+                query_words = [w.lower() for w in query.split() if len(w) > 3]
+                sentence_lower = sentence.lower()
+                
+                # Считаем совпадения с запросом
+                matches = sum(1 for word in query_words if word in sentence_lower)
+                
+                # Проверяем информативность
+                has_numbers = bool(re.search(r'\d+[%‰°]|\d+\.\d+|\d{4}', sentence))
+                has_meaning = len(sentence.split()) > 5
+                
+                if matches > 0 and has_meaning:
+                    return sentence[:180]
+        
+        return None
+    
+    def _extract_definition(self, text):
+        """Извлекает определение"""
+        patterns = [
+            r'это\s+[^.!?]{10,100}[.!?]',
+            r'является\s+[^.!?]{10,100}[.!?]',
+            r'определяется\s+как\s+[^.!?]{10,100}[.!?]',
+            r'под\s+[^.!?]{5,20}\s+понимают\s+[^.!?]{10,100}[.!?]'
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                definition = matches[0].strip()
+                if 20 < len(definition) < 150:
+                    return definition[:120] + "..."
+        
+        return None
+    
+    def _extract_statistics(self, text):
+        """Извлекает статистику"""
+        patterns = [
+            r'\d+\.?\d*%',
+            r'\d+\.?\d*\s*(?:млн|млрд|тыс|миллион|миллиард)',
+            r'\$\d+\.?\d*',
+            r'\d+\.?\d*\s*(?:долларов|рублей|евро)',
+            r'\d{4}\s*году?'
+        ]
+        
+        statistics = []
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            statistics.extend(matches)
+        
+        return statistics[:5]
+    
+    def _extract_key_terms(self, facts, definitions):
+        """Извлекает ключевые термины"""
+        all_text = " ".join([f["text"] for f in facts] + definitions)
+        
+        # Находим существительные (слова от 4 букв)
+        words = re.findall(r'\b[а-яё]{4,}\b', all_text.lower())
+        
+        # Считаем частоту
+        word_freq = {}
+        for word in words:
+            word_freq[word] = word_freq.get(word, 0) + 1
+        
+        # Сортируем по частоте
+        sorted_terms = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
+        return [term.capitalize() for term, freq in sorted_terms[:15]]
+    
+    def _extract_domain(self, url):
+        """Извлекает домен из URL"""
+        if not url:
+            return "unknown"
+        
+        # Упрощенное извлечение домена
+        domain = url.split('//')[-1].split('/')[0]
+        return domain
+    
+    def _remove_duplicates(self, facts):
+        """Удаляет дублирующиеся факты"""
+        seen_texts = set()
+        unique_facts = []
+        
+        for fact in facts:
+            text = fact["text"].lower()
+            # Упрощаем для сравнения
+            simple_text = re.sub(r'[^\w\s]', '', text)
+            words = simple_text.split()
+            key = " ".join(sorted(set(words))[:10])  # Используем ключевые слова
+            
+            if key not in seen_texts:
+                seen_texts.add(key)
+                unique_facts.append(fact)
+        
+        return unique_facts
+    
+    def _create_fallback_response(self, query):
+        """Создает fallback-ответ при проблемах с API"""
+        stats["fallback_mode"] += 1
+        
+        query_lower = query.lower()
+        
+        # Ищем в базе знаний
+        for topic, facts in KNOWLEDGE_BASE.items():
+            if topic in query_lower or any(word in query_lower for word in topic.split()):
+                analyzed_data = {
+                    "facts": [{"text": fact, "source": "knowledge_base", "domain": "knowledge_base"} 
+                             for fact in facts[:6]],
+                    "definitions": [facts[0]] if facts else [],
                     "statistics": [],
-                    "key_entities": [query.capitalize()],
-                    "total_unique_facts": 0,
-                    "source_coverage": {"total_sources": 0, "unique_domains": 0}
-                },
-                "quality_report": "❌ Нет данных от поисковика"
-            },
+                    "key_terms": [topic.capitalize()] + [f.split()[0].capitalize() for f in facts[:3]],
+                    "total_facts": len(facts[:6]),
+                    "total_definitions": 1 if facts else 0
+                }
+                
+                return {
+                    "success": True,
+                    "query": query,
+                    "results": analyzed_data,
+                    "total_results": len(facts[:6]),
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "knowledge_base",
+                    "fallback": True
+                }
+        
+        # Если не нашли в базе, создаем общий ответ
+        general_facts = [
+            f"{query} — важная тема, требующая изучения",
+            f"По теме '{query}' существует множество исследований и публикаций",
+            f"Рекомендуется обратиться к научным источникам для получения полной информации",
+            f"{query} имеет практическое применение в различных областях"
+        ]
+        
+        analyzed_data = {
+            "facts": [{"text": fact, "source": "general_knowledge", "domain": "general"} 
+                     for fact in general_facts],
+            "definitions": [f"{query} — тема, представляющая научный и практический интерес"],
+            "statistics": [],
+            "key_terms": [query.capitalize(), "Исследование", "Анализ", "Изучение"],
+            "total_facts": len(general_facts),
+            "total_definitions": 1
+        }
+        
+        return {
+            "success": True,
+            "query": query,
+            "results": analyzed_data,
+            "total_results": len(general_facts),
+            "timestamp": datetime.now().isoformat(),
+            "source": "general_knowledge",
             "fallback": True
         }
 
@@ -851,218 +419,212 @@ class SmartGoogleSearch:
 class SmartConspectGenerator:
     def __init__(self):
         self.searcher = SmartGoogleSearch()
-        logger.info("✅ Генератор готов с агрегацией информации")
+        logger.info("✅ Генератор конспектов готов")
     
-    def generate(self, topic, volume="extended"):  # По умолчанию расширенный
-        """Генерирует конспект с агрегацией информации"""
+    def generate(self, topic, volume="detailed"):
+        """Генерирует конспект"""
+        # Пасхалка
         if self._is_easter_egg(topic):
             return self._create_easter_egg_response()
         
+        # Выполняем поиск
+        logger.info(f"🔍 Начинаю поиск по теме: {topic}")
         search_results = self.searcher.search_and_analyze(topic)
-        structured_info = search_results.get("structured_info", {})
-        aggregated_data = structured_info.get("aggregated_data", {})
-        quality_report = structured_info.get("quality_report", "")
         
-        if volume == "detailed":
-            return self._generate_detailed(topic, aggregated_data, quality_report)
-        elif volume == "short":
-            return self._generate_short(topic, aggregated_data, quality_report)
+        if "error" in search_results:
+            return f"❌ *Ошибка:* {search_results['error']}"
+        
+        results = search_results.get("results", {})
+        source = search_results.get("source", "unknown")
+        
+        # Генерируем в зависимости от объема
+        if volume == "short":
+            return self._generate_short(topic, results, source)
+        elif volume == "extended":
+            return self._generate_extended(topic, results, source)
         else:
-            return self._generate_extended(topic, aggregated_data, quality_report)
+            return self._generate_detailed(topic, results, source)
     
     def _is_easter_egg(self, text):
         text_lower = text.lower()
-        return "пасхалка" in text_lower
+        return any(phrase in text_lower for phrase in [
+            "план захвата польши", "захват польши", "чайная пасхалка", "пасхалка"
+        ])
     
     def _create_easter_egg_response(self):
-        return "🥚 *Пасхалка найдена!* Бот использует продвинутую агрегацию данных."
+        return "🥚 *Пасхалка найдена!* Бот работает в штатном режиме."
     
-    def _generate_short(self, topic, data, quality_report):
-        """Кратко - ключевые факты"""
-        facts = data.get("linked_facts", [])
+    def _generate_short(self, topic, results, source):
+        """Краткий конспект"""
+        facts = results.get("facts", [])
         
-        if not facts:
-            return f"📌 *{topic}*\n\n{quality_report}\n\nИнформация не найдена"
+        conspect = f"📌 *{topic}*\n\n"
         
-        conspect = f"📌 *{topic}*\n\n{quality_report}\n\n"
+        if source == "knowledge_base" or source == "general_knowledge":
+            conspect += "📚 *Источник:* База знаний\n\n"
+        else:
+            conspect += f"🔍 *Источник:* {source}\n\n"
         
-        # Лучшие факты
-        for i, fact in enumerate(facts[:6], 1):
-            conspect += f"{i}. {fact}\n"
+        if facts:
+            for i, fact in enumerate(facts[:4], 1):
+                conspect += f"{i}. {fact['text']}\n"
+        else:
+            conspect += "Информация по теме требует дополнительного изучения\n"
         
         # Ключевые термины
-        entities = data.get("key_entities", [])
-        if entities:
-            conspect += f"\n🔑 *Ключевые понятия:* {', '.join(entities[:4])}\n"
+        terms = results.get("key_terms", [])
+        if terms:
+            conspect += f"\n🔑 *Ключевые термины:* {', '.join(terms[:5])}\n"
         
+        conspect += f"\n📊 *Фактов найдено:* {len(facts)}"
         return conspect
     
-    def _generate_detailed(self, topic, data, quality_report):
-        """Подробно - структурированная информация"""
-        conspect = f"📚 *{topic}*\n\n{quality_report}\n\n"
+    def _generate_detailed(self, topic, results, source):
+        """Подробный конспект"""
+        facts = results.get("facts", [])
+        definitions = results.get("definitions", [])
+        statistics = results.get("statistics", [])
         
-        # Основные факты
-        facts = data.get("linked_facts", [])
-        if facts:
-            conspect += "🎯 *Основные факты:*\n\n"
-            for i, fact in enumerate(facts[:10], 1):
-                conspect += f"{i}. {fact}\n"
+        conspect = f"📚 *{topic}*\n\n"
+        
+        if source == "knowledge_base":
+            conspect += "📚 *Режим:* База знаний (API недоступен)\n\n"
+        elif source == "general_knowledge":
+            conspect += "📚 *Режим:* Общие знания (API недоступен)\n\n"
+        else:
+            conspect += f"🔍 *Источник:* {source}\n\n"
         
         # Определения
-        definitions = data.get("definitions", [])
         if definitions:
-            conspect += f"\n📖 *Определения:*\n\n"
-            for definition in definitions[:4]:
+            conspect += "📖 *Определения:*\n\n"
+            for definition in definitions[:3]:
                 conspect += f"• {definition}\n"
+            conspect += "\n"
+        
+        # Факты
+        if facts:
+            conspect += "🎯 *Основные факты:*\n\n"
+            for i, fact in enumerate(facts[:8], 1):
+                conspect += f"{i}. {fact['text']}\n"
+            conspect += "\n"
+        else:
+            conspect += "⚠️ *Информация не найдена*\n\n"
         
         # Статистика
-        statistics = data.get("statistics", [])
         if statistics:
-            conspect += f"\n📊 *Статистика:*\n\n"
-            for stat in statistics[:6]:
+            conspect += "📊 *Статистика:*\n\n"
+            for stat in statistics[:5]:
                 conspect += f"• {stat}\n"
+            conspect += "\n"
         
-        # Временные данные
-        timeline = data.get("timeline_data", [])
-        if timeline:
-            conspect += f"\n🕒 *Хронология:*\n\n"
-            for event in timeline[:4]:
-                conspect += f"• {event}\n"
+        # Ключевые термины
+        terms = results.get("key_terms", [])
+        if terms:
+            conspect += "🔑 *Ключевые термины:*\n"
+            conspect += f"{', '.join(terms[:8])}\n"
         
-        # Информация об источниках
-        coverage = data.get("source_coverage", {})
-        if "total_sources" in coverage:
-            conspect += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
-            conspect += f"📚 Источников: {coverage['total_sources']} | "
-            conspect += f"🌐 Доменов: {coverage.get('unique_domains', 0)}"
+        # Информация о поиске
+        conspect += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
+        conspect += f"📈 Фактов: {len(facts)} | "
+        conspect += f"Определений: {len(definitions)} | "
+        conspect += f"Статистик: {len(statistics)}"
+        
+        if "fallback" in results:
+            conspect += "\n⚠️ *Внимание:* Используется локальная база знаний"
         
         return conspect
     
-    def _generate_extended(self, topic, data, quality_report):
-        """Полный анализ - вся агрегированная информация"""
-        conspect = f"🔬 *ПОЛНЫЙ АНАЛИЗ: {topic}*\n\n{quality_report}\n\n"
+    def _generate_extended(self, topic, results, source):
+        """Расширенный конспект"""
+        conspect = f"🔬 *ПОЛНЫЙ АНАЛИЗ: {topic}*\n\n"
         
-        # ВВЕДЕНИЕ
-        conspect += "="*50 + "\n"
-        conspect += "ВВЕДЕНИЕ И МЕТОДОЛОГИЯ\n"
-        conspect += "="*50 + "\n\n"
-        
-        coverage = data.get("source_coverage", {})
-        conspect += f"*Методология:* Агрегация информации из {coverage.get('total_sources', 0)} источников\n"
-        conspect += f"*Обработано фактов:* {data.get('total_unique_facts', 0)}\n"
-        conspect += f"*Удалено дубликатов:* {stats.get('duplicates_removed', 0)}\n"
-        conspect += f"*Время анализа:* {datetime.now().strftime('%H:%M')}\n\n"
-        
-        # ОСНОВНЫЕ ФАКТЫ
-        conspect += "="*50 + "\n"
-        conspect += "ОСНОВНЫЕ ФАКТЫ И ДАННЫЕ\n"
-        conspect += "="*50 + "\n\n"
-        
-        facts = data.get("linked_facts", [])
-        if facts:
-            for i, fact in enumerate(facts[:15], 1):
-                conspect += f"{i}. {fact}\n\n"
+        if source == "knowledge_base":
+            conspect += "📚 *Режим:* Локальная база знаний\n\n"
+        elif source == "general_knowledge":
+            conspect += "📚 *Режим:* Общие знания\n\n"
         else:
-            conspect += "Информация по теме требует дополнительного изучения\n\n"
+            conspect += f"🔍 *Источник данных:* {source}\n\n"
         
-        # СТАТИСТИКА И ЦИФРЫ
-        statistics = data.get("statistics", [])
+        conspect += "="*50 + "\n"
+        conspect += "ВВЕДЕНИЕ\n"
+        conspect += "="*50 + "\n\n"
+        
+        conspect += f"*Тема исследования:* {topic}\n"
+        conspect += f"*Время анализа:* {datetime.now().strftime('%H:%M')}\n"
+        conspect += f"*Режим работы:* {'Локальная база' if 'fallback' in results else 'Поиск в интернете'}\n\n"
+        
+        # ОПРЕДЕЛЕНИЯ
+        definitions = results.get("definitions", [])
+        if definitions:
+            conspect += "="*50 + "\n"
+            conspect += "ОПРЕДЕЛЕНИЯ И ПОНЯТИЯ\n"
+            conspect += "="*50 + "\n\n"
+            
+            for i, definition in enumerate(definitions, 1):
+                conspect += f"{i}. {definition}\n\n"
+        
+        # ФАКТЫ
+        facts = results.get("facts", [])
+        if facts:
+            conspect += "="*50 + "\n"
+            conspect += "ФАКТЫ И ИНФОРМАЦИЯ\n"
+            conspect += "="*50 + "\n\n"
+            
+            for i, fact in enumerate(facts[:12], 1):
+                source_info = f" ({fact.get('domain', '')})" if fact.get('domain') else ""
+                conspect += f"{i}. {fact['text']}{source_info}\n\n"
+        
+        # СТАТИСТИКА
+        statistics = results.get("statistics", [])
         if statistics:
             conspect += "="*50 + "\n"
-            conspect += "СТАТИСТИКА И ЧИСЛОВЫЕ ДАННЫЕ\n"
+            conspect += "ЦИФРЫ И СТАТИСТИКА\n"
             conspect += "="*50 + "\n\n"
             
             for stat in statistics:
                 conspect += f"• {stat}\n"
             conspect += "\n"
         
-        # ОПРЕДЕЛЕНИЯ И ПОНЯТИЯ
-        definitions = data.get("definitions", [])
-        if definitions:
+        # ТЕРМИНОЛОГИЯ
+        terms = results.get("key_terms", [])
+        if terms:
             conspect += "="*50 + "\n"
-            conspect += "ОПРЕДЕЛЕНИЯ И КЛЮЧЕВЫЕ ПОНЯТИЯ\n"
+            conspect += "ТЕРМИНОЛОГИЧЕСКИЙ СЛОВАРЬ\n"
             conspect += "="*50 + "\n\n"
             
-            for i, definition in enumerate(definitions, 1):
-                conspect += f"{i}. {definition}\n\n"
-        
-        # ХРОНОЛОГИЯ
-        timeline = data.get("timeline_data", [])
-        if timeline:
-            conspect += "="*50 + "\n"
-            conspect += "ХРОНОЛОГИЧЕСКИЕ ДАННЫЕ\n"
-            conspect += "="*50 + "\n\n"
-            
-            for event in timeline:
-                conspect += f"• {event}\n"
+            for i, term in enumerate(terms[:15], 1):
+                conspect += f"{i}. {term}\n"
             conspect += "\n"
         
-        # КЛЮЧЕВЫЕ СУЩНОСТИ
-        entities = data.get("key_entities", [])
-        if entities:
-            conspect += "="*50 + "\n"
-            conspect += "КЛЮЧЕВЫЕ СУЩНОСТИ И ОРГАНИЗАЦИИ\n"
-            conspect += "="*50 + "\n\n"
-            
-            for i, entity in enumerate(entities[:12], 1):
-                conspect += f"{i}. {entity}\n"
-            conspect += "\n"
-        
-        # СРАВНЕНИЯ И АНАЛИЗ
-        comparison = data.get("comparison_data", [])
-        if comparison:
-            conspect += "="*50 + "\n"
-            conspect += "СРАВНИТЕЛЬНЫЙ АНАЛИЗ\n"
-            conspect += "="*50 + "\n\n"
-            
-            for comp in comparison:
-                conspect += f"• {comp}\n"
-            conspect += "\n"
-        
-        # СПОРНЫЕ МОМЕНТЫ
-        controversial = data.get("controversial_points", [])
-        if controversial:
-            conspect += "="*50 + "\n"
-            conspect += "СПОРНЫЕ И ДИСКУССИОННЫЕ МОМЕНТЫ\n"
-            conspect += "="*50 + "\n\n"
-            
-            for point in controversial:
-                conspect += f"• {point}\n"
-            conspect += "\n"
-        
-        # АНАЛИЗ ИСТОЧНИКОВ
+        # ИТОГИ
         conspect += "="*50 + "\n"
-        conspect += "АНАЛИЗ ИСТОЧНИКОВ И ДОСТОВЕРНОСТИ\n"
+        conspect += "ИТОГИ И РЕКОМЕНДАЦИИ\n"
         conspect += "="*50 + "\n\n"
         
-        conspect += f"*Всего обработано источников:* {coverage.get('total_sources', 0)}\n"
-        conspect += f"*Уникальных доменов:* {coverage.get('unique_domains', 0)}\n"
-        conspect += f"*Связей между фактами:* {len(facts)}\n"
-        conspect += f"*Удалено дубликатов:* {stats.get('duplicates_removed', 0)}\n\n"
+        total_facts = len(facts)
         
-        if "domain_distribution" in coverage:
-            conspect += "*Распределение по доменам:*\n"
-            for domain, count in coverage["domain_distribution"].items():
-                conspect += f"• {domain}: {count} источников\n"
-        
-        # ЗАКЛЮЧЕНИЕ
-        conspect += "\n" + "="*50 + "\n"
-        conspect += "ЗАКЛЮЧЕНИЕ И ВЫВОДЫ\n"
-        conspect += "="*50 + "\n\n"
-        
-        total_facts = data.get("total_unique_facts", 0)
-        if total_facts >= 10:
-            conspect += "✅ Информация хорошо освещена в различных источниках\n"
-            conspect += "✅ Найдены статистические данные и конкретные факты\n"
-            conspect += "✅ Выявлены ключевые сущности и хронология\n"
-        elif total_facts >= 5:
-            conspect += "⚠️ Информация представлена ограниченно\n"
-            conspect += "⚠️ Рекомендуется обратиться к дополнительным источникам\n"
+        if total_facts >= 8:
+            conspect += "✅ Информация достаточно полная для начального изучения\n"
+            conspect += "✅ Имеются конкретные данные и определения\n"
+            conspect += "✅ Тема освещена с разных сторон\n"
+        elif total_facts >= 4:
+            conspect += "⚠️ Информация ограниченная, требует дополнения\n"
+            conspect += "⚠️ Рекомендуется обратиться к специализированным источникам\n"
         else:
-            conspect += "❌ Информации недостаточно для комплексного анализа\n"
-            conspect += "❌ Требуются дополнительные исследования\n"
+            conspect += "❌ Информации недостаточно для анализа\n"
+            conspect += "❌ Попробуйте уточнить запрос или использовать другие источники\n"
         
-        conspect += f"\n🤖 *@Konspekt_help_bot* | 🧠 *Агрегация данных* | 🕒 {datetime.now().strftime('%d.%m.%Y')}"
+        conspect += f"\n📊 *Статистика анализа:*\n"
+        conspect += f"• Фактов: {len(facts)}\n"
+        conspect += f"• Определений: {len(definitions)}\n"
+        conspect += f"• Статистических данных: {len(statistics)}\n"
+        conspect += f"• Ключевых терминов: {len(terms)}\n"
+        
+        if "fallback" in results:
+            conspect += f"\n⚠️ *Примечание:* API поиска временно недоступен. Используется локальная база знаний.\n"
+            conspect += f"Для полного функционала проверьте настройки GOOGLE_API_KEY\n"
+        
+        conspect += f"\n🤖 *@Konspekt_help_bot* | 🕒 {datetime.now().strftime('%d.%m.%Y')}"
         
         return conspect
 
@@ -1079,7 +641,7 @@ class TelegramBot:
         if RENDER_EXTERNAL_URL:
             self._setup_webhook()
         
-        logger.info("✅ Telegram бот готов с агрегацией информации")
+        logger.info("✅ Telegram бот готов к работе")
     
     def _setup_webhook(self):
         webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
@@ -1090,7 +652,9 @@ class TelegramBot:
                 timeout=10
             )
             if response.json().get("ok"):
-                logger.info(f"✅ Вебхук: {webhook_url}")
+                logger.info(f"✅ Вебхук установлен: {webhook_url}")
+            else:
+                logger.warning(f"⚠️ Ошибка вебхука: {response.json()}")
         except Exception as e:
             logger.error(f"❌ Ошибка вебхука: {e}")
     
@@ -1105,10 +669,10 @@ class TelegramBot:
                 return self._send_help(chat_id)
             elif text == "/stats":
                 return self._send_stats(chat_id)
-            elif text == "/quality":
-                return self._send_quality_info(chat_id)
+            elif text == "/api_status":
+                return self._send_api_status(chat_id)
             else:
-                return self._send_message(chat_id, "❓ Неизвестная команда")
+                return self._send_message(chat_id, "❓ Неизвестная команда. Используйте /help")
         
         if text in ["1", "2", "3"]:
             return self._handle_volume(chat_id, text)
@@ -1117,65 +681,91 @@ class TelegramBot:
     
     def _send_welcome(self, chat_id):
         welcome = (
-            "🤖 *Бот с агрегацией информации*\n\n"
-            "🔍 *Что нового:*\n"
-            "• ✅ Собирает данные с 12+ источников\n"
-            "• ✅ Удаляет дубликаты информации\n"
-            "• ✅ Связывает родственные факты\n"
-            "• ✅ Предоставляет в 3 раза больше данных\n\n"
+            "🤖 *Добро пожаловать в Konspekt Helper Bot!*\n\n"
+            "🔍 *Как использовать:*\n"
+            "1. Напишите тему для изучения\n"
+            "2. Выберите уровень детализации (1, 2 или 3)\n"
+            "3. Получите структурированную информацию\n\n"
             "📊 *Уровни анализа:*\n"
-            "• 1 — Ключевые факты (6+ пунктов)\n"
-            "• 2 — Структурированная информация\n"
-            "• 3 — Полный анализ со статистикой\n\n"
-            "📌 Просто напишите тему"
+            "• 1 — Краткие тезисы\n"
+            "• 2 — Подробный конспект\n"
+            "• 3 — Полный анализ\n\n"
+            "🚀 *Примеры тем:*\n"
+            "• Искусственный интеллект\n"
+            "• Квантовая физика\n"
+            "• Древний Рим\n"
+            "• Блокчейн технологии\n\n"
+            "📌 *Примечание:* Если API недоступен, используется локальная база знаний"
         )
         return self._send_message(chat_id, welcome)
     
     def _send_help(self, chat_id):
         help_text = (
-            "🔍 *Как работает агрегация:*\n\n"
-            "1. *Сбор данных:* Бот проверяет 12+ источников\n"
-            "2. *Фильтрация:* Удаляет дубликаты и ненадежный контент\n"
-            "3. *Агрегация:* Объединяет информацию из разных мест\n"
-            "4. *Связывание:* Находит связи между фактами\n"
-            "5. *Структурирование:* Создает четкую структуру\n\n"
-            "📊 *Пример для темы 'Искусственный интеллект':*\n"
-            "• Раньше: 4-5 разрозненных факта\n"
-            "• Сейчас: 10-15 связанных фактов + статистика + хронология\n\n"
-            "📌 *Попробуйте:* 'История Рима', 'Квантовая физика', 'Экономика Китая'"
+            "📚 *Konspekt Helper Bot*\n\n"
+            "*Возможные проблемы и решения:*\n\n"
+            "❌ *Проблема:* 'Нет данных от поисковиков'\n"
+            "✅ *Решение:*\n"
+            "1. Проверьте GOOGLE_API_KEY в настройках\n"
+            "2. Убедитесь, что API ключ действителен\n"
+            "3. При отсутствии API используется локальная база\n\n"
+            "*Команды:*\n"
+            "/start - Информация о боте\n"
+            "/help - Эта справка\n"
+            "/stats - Статистика работы\n"
+            "/api_status - Статус API\n\n"
+            "*Работа с ботом:*\n"
+            "1. Просто напишите тему\n"
+            "2. Выберите 1, 2 или 3\n"
+            "3. Получите конспект"
         )
         return self._send_message(chat_id, help_text)
     
     def _send_stats(self, chat_id):
         stat_text = (
-            f"📊 *Статистика агрегации:*\n\n"
+            f"📊 *Статистика бота:*\n\n"
             f"👥 Пользователей: {stats['total_users']}\n"
             f"💬 Сообщений: {stats['total_messages']}\n"
             f"📄 Конспектов: {stats['conspects_created']}\n"
-            f"🔍 Поисков: {stats['google_searches']}\n"
-            f"✅ Агрегировано фактов: {stats['aggregated_facts']}\n"
-            f"🚫 Удалено дубликатов: {stats['duplicates_removed']}\n"
-            f"📈 Эффективность: {stats['aggregated_facts']/(stats['google_searches']*10+1):.1f} фактов/поиск"
+            f"🔍 Поисковых запросов: {stats['google_searches']}\n"
+            f"❌ Ошибок API: {stats['api_errors']}\n"
+            f"📚 Fallback режим: {stats['fallback_mode']}\n"
+            f"⏱ Работает с: {stats['start_time'][:10]}\n\n"
+            f"📌 *API статус:* {'✅ Активен' if GOOGLE_API_KEY else '❌ Отключен'}"
         )
         return self._send_message(chat_id, stat_text)
     
-    def _send_quality_info(self, chat_id):
-        info = (
-            "🔬 *Система агрегации:*\n\n"
-            "*Этапы обработки:*\n"
-            "1. Сбор с 12+ источников\n"
-            "2. Проверка качества каждого источника\n"
-            "3. Удаление дубликатов (хеширование)\n"
-            "4. Классификация фактов по типам\n"
-            "5. Связывание родственной информации\n"
-            "6. Структурирование в читаемый формат\n\n"
-            "*Что исключается:*\n"
-            "• Дублирующаяся информация\n"
-            "• Контент с низкокачественных сайтов\n"
-            "• Неподтвержденные утверждения\n\n"
-            "📌 Результат: в 3 раза больше полезной информации"
-        )
-        return self._send_message(chat_id, info)
+    def _send_api_status(self, chat_id):
+        if GOOGLE_API_KEY:
+            status = "✅ *API ключ установлен*\n\n"
+            status += "Проверяю соединение с Google API..."
+            
+            self._send_message(chat_id, status)
+            
+            # Проверяем соединение
+            try:
+                test_url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_API_KEY}&cx=test&q=test"
+                response = requests.get(test_url, timeout=5)
+                
+                if response.status_code == 200:
+                    result = "✅ *Соединение успешно*\nAPI работает корректно"
+                elif response.status_code == 403:
+                    result = "❌ *Ошибка доступа*\nПроверьте правильность API ключа"
+                else:
+                    result = f"⚠️ *Статус: {response.status_code}*\nAPI отвечает, но могут быть ограничения"
+                    
+            except Exception as e:
+                result = f"❌ *Ошибка соединения:* {str(e)[:100]}"
+        else:
+            result = (
+                "❌ *API ключ не установлен*\n\n"
+                "Бот работает в ограниченном режиме с локальной базой знаний.\n\n"
+                "*Как исправить:*\n"
+                "1. Получите API ключ Google Custom Search\n"
+                "2. Установите переменную GOOGLE_API_KEY\n"
+                "3. Перезапустите бота"
+            )
+        
+        return self._send_message(chat_id, result)
     
     def _handle_topic(self, chat_id, topic):
         user_id = str(chat_id)
@@ -1185,13 +775,12 @@ class TelegramBot:
         stats["user_states"][user_id]["pending_topic"] = topic
         
         response = (
-            f"🎯 *Тема: {topic}*\n\n"
-            f"🔍 *Будет собрана информация с 12+ источников*\n\n"
-            f"📊 *Уровень анализа:*\n\n"
-            f"1️⃣ Ключевые факты (6+ пунктов)\n"
-            f"2️⃣ Структурированная информация\n"
-            f"3️⃣ Полный анализ со статистикой\n\n"
-            f"Отправьте 1, 2 или 3"
+            f"🎯 *Тема принята: {topic}*\n\n"
+            f"📊 *Выберите уровень анализа:*\n\n"
+            f"1️⃣ *Краткие тезисы*\nОсновные факты и термины\n\n"
+            f"2️⃣ *Подробный конспект*\nФакты + определения + статистика\n\n"
+            f"3️⃣ *Полный анализ*\nВсе данные с структурой\n\n"
+            f"🔢 *Отправьте цифру 1, 2 или 3*"
         )
         return self._send_message(chat_id, response)
     
@@ -1201,29 +790,30 @@ class TelegramBot:
         topic = user_state.get("pending_topic", "")
         
         if not topic:
-            return self._send_message(chat_id, "❌ Сначала отправьте тему")
+            return self._send_message(chat_id, "❌ Сначала отправьте тему для анализа")
         
         volume_map = {"1": "short", "2": "detailed", "3": "extended"}
-        volume = volume_map.get(volume_choice, "short")
+        volume = volume_map.get(volume_choice, "detailed")
         
         # Уведомление
-        self._send_message(chat_id, f"🔍 *Собираю информацию по теме:* {topic}\n📊 Уровень: {volume_choice}/3\n⏳ Это займет 10-15 секунд...")
+        self._send_message(chat_id, f"🔍 *Анализирую тему:* {topic}\n📊 Уровень: {volume_choice}/3\n⏳ Подождите...")
         
         try:
             conspect = self.generator.generate(topic, volume)
             stats["conspects_created"] += 1
             
-            # Отправляем
+            # Отправляем конспект
             self._send_conspect_safely(chat_id, conspect)
             
-            # Короткое завершение
-            return self._send_message(chat_id, "✅ *Анализ завершен!*\n\nНовая тема? Просто напишите её")
+            # Финальное сообщение
+            final_msg = f"✅ *Анализ завершен!*\n\nНовая тема? Просто напишите её"
+            return self._send_message(chat_id, final_msg)
             
         except Exception as e:
-            logger.error(f"❌ Ошибка: {e}")
+            logger.error(f"❌ Ошибка генерации: {e}")
             return self._send_message(
                 chat_id,
-                f"❌ *Ошибка агрегации информации*\n\nПопробуйте другую формулировку или тему"
+                f"❌ *Ошибка анализа*\n\nПопробуйте другую тему или уточните запрос\n\nОшибка: {str(e)[:100]}"
             )
     
     def _send_conspect_safely(self, chat_id, conspect):
@@ -1235,22 +825,15 @@ class TelegramBot:
             return
         
         # Разбиваем по разделам
-        sections = re.split(r'(={10,})', conspect)
+        parts = conspect.split('\n\n')
         
         current = ""
-        for section in sections:
-            if re.match(r'={10,}', section):
-                if current and len(current) > 1000:
-                    self._send_message(chat_id, current.strip())
-                    current = section + "\n\n"
-                else:
-                    current += section + "\n\n"
+        for part in parts:
+            if len(current + part) > max_length and current:
+                self._send_message(chat_id, current.strip())
+                current = part + "\n\n"
             else:
-                if len(current + section) > max_length and current:
-                    self._send_message(chat_id, current.strip())
-                    current = section
-                else:
-                    current += section
+                current += part + "\n\n"
         
         if current.strip():
             self._send_message(chat_id, current.strip())
@@ -1281,9 +864,14 @@ class TelegramBot:
                 },
                 timeout=15
             )
+            
+            if not response.json().get("ok"):
+                logger.error(f"❌ Ошибка Telegram API: {response.json()}")
+            
             return response.json().get("ok", False)
+            
         except Exception as e:
-            logger.error(f"❌ Ошибка отправки: {e}")
+            logger.error(f"❌ Ошибка отправки сообщения: {e}")
             return False
 
 # ==================== HTTP СЕРВЕР ====================
@@ -1297,13 +885,15 @@ class BotHTTPServer(BaseHTTPRequestHandler):
             self._send_json({"status": "ok", "time": datetime.now().isoformat()})
         elif path == "/stats":
             self._send_json(stats)
-        elif path == "/quality_info":
-            info = {
-                "aggregated_facts": stats.get("aggregated_facts", 0),
-                "duplicates_removed": stats.get("duplicates_removed", 0),
-                "total_searches": stats.get("google_searches", 0)
+        elif path == "/api_check":
+            status = {
+                "google_api_key_set": bool(GOOGLE_API_KEY),
+                "telegram_token_set": bool(TELEGRAM_TOKEN),
+                "total_searches": stats["google_searches"],
+                "api_errors": stats["api_errors"],
+                "fallback_mode": stats["fallback_mode"]
             }
-            self._send_json(info)
+            self._send_json(status)
         else:
             self.send_response(404)
             self.end_headers()
@@ -1362,49 +952,50 @@ INDEX_HTML = """<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>🤖 Бот с агрегацией информации</title>
+    <title>🤖 Konspekt Helper Bot</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .status { color: green; font-weight: bold; padding: 10px; background: #e8f5e8; border-radius: 5px; }
-        .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px 0; }
-        .feature { background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6; }
-        .feature h4 { margin-top: 0; color: #1e40af; }
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .status-ok { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status-warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+        .status-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .btn { display: inline-block; background: #0088cc; color: white; padding: 10px 20px; border-radius: 5px; text-decoration: none; margin: 5px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>🤖 Бот с агрегацией информации</h2>
-        <p class="status">✅ Работает с системой агрегации из 12+ источников</p>
+        <h1>🤖 Konspekt Helper Bot</h1>
         
-        <div class="features">
-            <div class="feature">
-                <h4>📚 Агрегация</h4>
-                <p>Собирает данные с 12+ источников</p>
-            </div>
-            <div class="feature">
-                <h4>🔍 Фильтрация</h4>
-                <p>Удаляет дубликаты и ненадежный контент</p>
-            </div>
-            <div class="feature">
-                <h4>🔗 Связывание</h4>
-                <p>Находит связи между родственными фактами</p>
-            </div>
-            <div class="feature">
-                <h4>📊 Объем</h4>
-                <p>В 3 раза больше полезной информации</p>
-            </div>
+        <div class="status status-ok">
+            ✅ Сервер работает
+        </div>
+        
+        <div id="api_status" class="status status-warning">
+            ⏳ Проверка API...
         </div>
         
         <h3>📊 Статистика системы:</h3>
         <div id="stats">Загрузка...</div>
         
         <h3>🔗 Быстрые ссылки:</h3>
-        <p><a href="https://t.me/Konspekt_help_bot" target="_blank">🤖 Открыть бота</a></p>
-        <p><a href="/stats" target="_blank">📈 Полная статистика (JSON)</a></p>
-        <p><a href="/quality_info" target="_blank">🔬 Информация об агрегации</a></p>
+        <div>
+            <a href="https://t.me/Konspekt_help_bot" class="btn" target="_blank">🤖 Открыть бота</a>
+            <a href="/stats" class="btn">📈 Статистика (JSON)</a>
+            <a href="/api_check" class="btn">🔧 Проверка API</a>
+            <a href="/health" class="btn">❤️ Health Check</a>
+        </div>
         
-        <p style="color: #666; margin-top: 20px;">
+        <h3>⚠️ Решение проблем:</h3>
+        <p><strong>Если бот пишет "Нет данных от поисковиков":</strong></p>
+        <ol>
+            <li>Проверьте наличие GOOGLE_API_KEY в настройках</li>
+            <li>Убедитесь, что API ключ действителен</li>
+            <li>При отсутствии API бот использует локальную базу знаний</li>
+            <li>Используйте команду /api_status в боте для проверки</li>
+        </ol>
+        
+        <p style="color: #666; margin-top: 30px;">
             Обновлено: <span id="time"></span>
         </p>
     </div>
@@ -1417,10 +1008,11 @@ INDEX_HTML = """<!DOCTYPE html>
                 
                 document.getElementById('stats').innerHTML = `
                     <p>👥 Пользователей: ${data.total_users || 0}</p>
+                    <p>💬 Сообщений: ${data.total_messages || 0}</p>
                     <p>📄 Конспектов: ${data.conspects_created || 0}</p>
                     <p>🔍 Поисков: ${data.google_searches || 0}</p>
-                    <p>✅ Агрегировано фактов: ${data.aggregated_facts || 0}</p>
-                    <p>🚫 Удалено дубликатов: ${data.duplicates_removed || 0}</p>
+                    <p>❌ Ошибок API: ${data.api_errors || 0}</p>
+                    <p>📚 Fallback режим: ${data.fallback_mode || 0}</p>
                 `;
                 
                 document.getElementById('time').textContent = new Date().toLocaleTimeString();
@@ -1429,8 +1021,38 @@ INDEX_HTML = """<!DOCTYPE html>
             }
         }
         
+        async function checkAPIStatus() {
+            try {
+                const response = await fetch('/api_check');
+                const data = await response.json();
+                
+                let statusHtml = '';
+                
+                if (data.google_api_key_set) {
+                    statusHtml = '<div class="status status-ok">✅ GOOGLE_API_KEY установлен</div>';
+                } else {
+                    statusHtml = '<div class="status status-error">❌ GOOGLE_API_KEY не установлен</div>';
+                }
+                
+                if (data.telegram_token_set) {
+                    statusHtml += '<div class="status status-ok">✅ TELEGRAM_TOKEN установлен</div>';
+                }
+                
+                statusHtml += `<p>🔍 Поисков: ${data.total_searches || 0}</p>`;
+                statusHtml += `<p>❌ Ошибок API: ${data.api_errors || 0}</p>`;
+                statusHtml += `<p>📚 Fallback режим: ${data.fallback_mode || 0}</p>`;
+                
+                document.getElementById('api_status').innerHTML = statusHtml;
+            } catch (error) {
+                document.getElementById('api_status').innerHTML = 
+                    '<div class="status status-error">❌ Ошибка проверки API</div>';
+            }
+        }
+        
         loadStats();
-        setInterval(loadStats, 10000);
+        checkAPIStatus();
+        setInterval(loadStats, 5000);
+        setInterval(checkAPIStatus, 30000);
     </script>
 </body>
 </html>
@@ -1439,13 +1061,18 @@ INDEX_HTML = """<!DOCTYPE html>
 # ==================== ЗАПУСК ====================
 def main():
     logger.info("=" * 60)
-    logger.info("🚀 ЗАПУСК БОТА С АГРЕГАЦИЕЙ ИНФОРМАЦИИ")
+    logger.info("🚀 ЗАПУСК KONSPEKT HELPER BOT")
     logger.info("=" * 60)
     logger.info(f"🌐 URL: {RENDER_EXTERNAL_URL}")
     logger.info(f"🚪 Порт: {PORT}")
-    logger.info("✅ Режим: Агрегация из 12+ источников")
-    logger.info("✅ Фильтрация дубликатов")
-    logger.info("✅ Связывание информации")
+    logger.info(f"🔑 GOOGLE_API_KEY: {'✅ Установлен' if GOOGLE_API_KEY else '❌ Отсутствует'}")
+    logger.info(f"🤖 TELEGRAM_TOKEN: {'✅ Установлен' if TELEGRAM_TOKEN else '❌ Отсутствует'}")
+    
+    if not GOOGLE_API_KEY:
+        logger.warning("⚠️ ВНИМАНИЕ: API ключ не установлен")
+        logger.warning("⚠️ Бот будет работать в ограниченном режиме")
+        logger.warning("⚠️ Для полного функционала установите GOOGLE_API_KEY")
+    
     logger.info("=" * 60)
     
     server = HTTPServer(('', PORT), BotHTTPServer)
