@@ -512,7 +512,8 @@ class BotHTTPServer(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
-            self.wfile.write(b'<h1>Konspekt Helper Bot работает!</h1>')
+            # ИСПРАВЛЕНО: используем encode() для русских символов
+            self.wfile.write('<h1>Бот-помощник Konspekt работает!</h1>'.encode('utf-8'))
         elif self.path == "/health":
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
